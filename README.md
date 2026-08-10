@@ -38,7 +38,7 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 - PDF and CSV export, including payment/bank details, due date, payment terms, and tax note, with full Unicode font support (Polish, and other Latin-Extended-A text render correctly, unlike PDFKit's default fonts)
 
 **Reporting**
-- Team time/cost summaries by project and by user, with CSV/PDF export
+- Team time/cost summaries by project, by task, and by user, with CSV/PDF export
 
 ## Architecture
 

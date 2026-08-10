@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProjectsStore } from '../../stores/projects'
 import { useClientsStore } from '../../stores/clients'
@@ -57,6 +57,26 @@ function memberName(userId: string): string {
   const m = team.current?.members.find((mm) => mm.userId === userId)
   return m ? `${m.firstName} ${m.lastName}` : userId
 }
+
+// A project/task/user with time recorded in more than one currency (e.g.
+// its project's currency was changed partway through) produces more than
+// one row here — one per currency, since amounts in different currencies
+// can't be summed. Sorting by name then currency keeps those rows adjacent
+// instead of scattered by insertion order, so the split reads as "same
+// entity, split by currency" rather than an unexplained duplicate.
+const sortedByProject = computed(() =>
+  [...(summary.value?.byProject ?? [])].sort((a, b) => a.projectName.localeCompare(b.projectName) || a.currency.localeCompare(b.currency))
+)
+const sortedByTask = computed(() =>
+  [...(summary.value?.byTask ?? [])].sort(
+    (a, b) => (a.taskName ?? '').localeCompare(b.taskName ?? '') || a.currency.localeCompare(b.currency)
+  )
+)
+const sortedByUser = computed(() =>
+  [...(summary.value?.byUser ?? [])].sort(
+    (a, b) => memberName(a.userId).localeCompare(memberName(b.userId)) || a.currency.localeCompare(b.currency)
+  )
+)
 
 const { loading: exportingCsv, run: exportCsv } = useAsyncAction(() => reportsService.downloadReportCsv(teamId, filters))
 const { loading: exportingPdf, run: exportPdf } = useAsyncAction(() => reportsService.downloadReportPdf(teamId, filters))
@@ -180,14 +200,40 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
 
         <div>
           <h2 class="mb-2 text-sm font-semibold text-surface-800">By project</h2>
+          <p v-if="new Set(summary.byProject.map((r) => r.projectId)).size < summary.byProject.length" class="mb-2 text-xs text-surface-500">
+            A project appears more than once when it has time recorded in more than one currency (amounts can't be summed across currencies).
+          </p>
           <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
             <table class="w-full text-sm">
               <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
-                <tr><th class="px-4 py-2 font-medium">Project</th><th class="px-4 py-2 text-right font-medium">Hours</th><th class="px-4 py-2 text-right font-medium">Cost</th></tr>
+                <tr><th class="px-4 py-2 font-medium">Project</th><th class="px-4 py-2 font-medium">Currency</th><th class="px-4 py-2 text-right font-medium">Hours</th><th class="px-4 py-2 text-right font-medium">Cost</th></tr>
               </thead>
               <tbody class="divide-y divide-surface-100">
-                <tr v-for="row in summary.byProject" :key="`${row.projectId}-${row.currency}`">
+                <tr v-for="row in sortedByProject" :key="`${row.projectId}-${row.currency}`">
                   <td class="px-4 py-2">{{ row.projectName }}</td>
+                  <td class="px-4 py-2 text-surface-500">{{ row.currency }}</td>
+                  <td class="px-4 py-2 text-right tabular-nums">{{ row.hours }}</td>
+                  <td class="px-4 py-2 text-right tabular-nums"><CurrencyDisplay :amount="row.cost" :currency="row.currency" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div v-if="summary.byTask.length > 0">
+          <h2 class="mb-2 text-sm font-semibold text-surface-800">By task</h2>
+          <p v-if="new Set(summary.byTask.map((r) => r.taskId)).size < summary.byTask.length" class="mb-2 text-xs text-surface-500">
+            A task appears more than once when it has time recorded in more than one currency (amounts can't be summed across currencies).
+          </p>
+          <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
+            <table class="w-full text-sm">
+              <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
+                <tr><th class="px-4 py-2 font-medium">Task</th><th class="px-4 py-2 font-medium">Currency</th><th class="px-4 py-2 text-right font-medium">Hours</th><th class="px-4 py-2 text-right font-medium">Cost</th></tr>
+              </thead>
+              <tbody class="divide-y divide-surface-100">
+                <tr v-for="row in sortedByTask" :key="`${row.taskId ?? 'none'}-${row.currency}`">
+                  <td class="px-4 py-2">{{ row.taskName ?? 'No task' }}</td>
+                  <td class="px-4 py-2 text-surface-500">{{ row.currency }}</td>
                   <td class="px-4 py-2 text-right tabular-nums">{{ row.hours }}</td>
                   <td class="px-4 py-2 text-right tabular-nums"><CurrencyDisplay :amount="row.cost" :currency="row.currency" /></td>
                 </tr>
@@ -198,14 +244,18 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
 
         <div v-if="team.isManager">
           <h2 class="mb-2 text-sm font-semibold text-surface-800">By user</h2>
+          <p v-if="new Set(summary.byUser.map((r) => r.userId)).size < summary.byUser.length" class="mb-2 text-xs text-surface-500">
+            A user appears more than once when they have time recorded in more than one currency (amounts can't be summed across currencies).
+          </p>
           <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
             <table class="w-full text-sm">
               <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
-                <tr><th class="px-4 py-2 font-medium">User</th><th class="px-4 py-2 text-right font-medium">Hours</th><th class="px-4 py-2 text-right font-medium">Cost</th></tr>
+                <tr><th class="px-4 py-2 font-medium">User</th><th class="px-4 py-2 font-medium">Currency</th><th class="px-4 py-2 text-right font-medium">Hours</th><th class="px-4 py-2 text-right font-medium">Cost</th></tr>
               </thead>
               <tbody class="divide-y divide-surface-100">
-                <tr v-for="row in summary.byUser" :key="`${row.userId}-${row.currency}`">
+                <tr v-for="row in sortedByUser" :key="`${row.userId}-${row.currency}`">
                   <td class="px-4 py-2">{{ memberName(row.userId) }}</td>
+                  <td class="px-4 py-2 text-surface-500">{{ row.currency }}</td>
                   <td class="px-4 py-2 text-right tabular-nums">{{ row.hours }}</td>
                   <td class="px-4 py-2 text-right tabular-nums"><CurrencyDisplay :amount="row.cost" :currency="row.currency" /></td>
                 </tr>

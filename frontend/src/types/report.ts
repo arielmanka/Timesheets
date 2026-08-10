@@ -16,7 +16,7 @@ export interface ReportSummary {
   costByCurrency: Array<{ currency: string; totalCost: number }>
   byProject: Array<{ projectId: ID; projectName: string; currency: string; hours: number; cost: number }>
   byUser: Array<{ userId: ID; currency: string; hours: number; cost: number }>
-  byTask: Array<{ taskId: ID | null; currency: string; hours: number; cost: number }>
+  byTask: Array<{ taskId: ID | null; taskName: string | null; currency: string; hours: number; cost: number }>
   records: Array<{
     _id: ID
     userId: ID

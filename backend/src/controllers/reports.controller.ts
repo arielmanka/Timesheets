@@ -118,6 +118,14 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     }
     doc.moveDown();
 
+    // By Task
+    doc.fontSize(14).text('By Task', { underline: true });
+    doc.fontSize(10);
+    for (const entry of result.byTask) {
+      doc.text(`  ${entry.taskName ?? 'No task'}: ${entry.hours}h — ${entry.currency} ${entry.cost.toFixed(2)}`);
+    }
+    doc.moveDown();
+
     // By User
     doc.fontSize(14).text('By User', { underline: true });
     doc.fontSize(10);

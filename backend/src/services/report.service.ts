@@ -1,5 +1,6 @@
 import { TimeRecord } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
+import { Task } from '../models/Task.js';
 import { Invoice, type InvoiceStatus, type InvoiceType } from '../models/Invoice.js';
 import { Client } from '../models/Client.js';
 
@@ -34,6 +35,7 @@ export interface ReportSummary {
   }>;
   byTask: Array<{
     taskId: string | null;
+    taskName: string | null;
     currency: string;
     hours: number;
     cost: number;
@@ -105,6 +107,9 @@ export async function getSummary(
 
   const records = await TimeRecord.find(query).sort({ date: -1 });
 
+  const tasks = await Task.find({ projectId: { $in: projectIds } });
+  const taskMap = new Map(tasks.map((t) => [t._id.toString(), t.name]));
+
   // Aggregate — every map is keyed by `${id}:${currency}` so entries in
   // different currencies never collapse into one row.
   let totalMinutes = 0;
@@ -165,8 +170,10 @@ export async function getSummary(
     }),
     byTask: Array.from(byTaskMap.entries()).map(([key, data]) => {
       const [id, currency] = key.split(':');
+      const taskId = id === '__none__' ? null : id;
       return {
-        taskId: id === '__none__' ? null : id,
+        taskId,
+        taskName: taskId ? (taskMap.get(taskId) ?? 'Unknown task') : null,
         currency,
         hours: Math.round(data.hours * 100) / 100,
         cost: Math.round(data.cost * 100) / 100,
