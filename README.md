@@ -40,6 +40,10 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 **Reporting**
 - Team time/cost summaries by project, by task, and by user, with CSV/PDF export
 
+**Audit log**
+- Immutable, per-team audit trail of team-member/project/task rate changes and time record approvals/reversions/rejections/invoice generation, each entry denormalized with actor and entity names at write time so it stays readable even if a project or user is later renamed or removed
+- A manager-only Audit Log page, filterable by event type, entity type, and date range — this system has no central administrator (every team is self-managed), so a team's own managers are the closest equivalent and the only ones who can view it
+
 ## Architecture
 
 ```mermaid
@@ -208,6 +212,7 @@ All routes are versioned under `/api/v1`. Team-scoped routes (`/teams/:teamId/..
 | Time records | `/api/v1/teams/:teamId/time-records` | create/update/delete by owner; approve/unapprove/reject manager-only |
 | Invoices | `/api/v1/teams/:teamId/invoices` | personal invoices by owner; collective invoices, pooling, and payments are manager-only; PDF/CSV export |
 | Reports | `/api/v1/teams/:teamId/reports` | team time/cost summaries, CSV/PDF export |
+| Audit log | `/api/v1/teams/:teamId/audit-log` | manager-only, filterable by event type / entity type / date range |
 
 ## Testing
 

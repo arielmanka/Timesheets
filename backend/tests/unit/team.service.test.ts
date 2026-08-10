@@ -10,6 +10,8 @@ const {
   mockTeamDeleteOne,
   mockTeamConstructor,
   mockUserFindOne,
+  mockUserFindById,
+  mockAuditLog,
 } = vi.hoisted(() => ({
   mockTeamSave: vi.fn().mockResolvedValue(undefined),
   mockTeamFindById: vi.fn(),
@@ -17,6 +19,8 @@ const {
   mockTeamDeleteOne: vi.fn(),
   mockTeamConstructor: vi.fn(),
   mockUserFindOne: vi.fn(),
+  mockUserFindById: vi.fn().mockResolvedValue({ firstName: 'Target', lastName: 'User' }),
+  mockAuditLog: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../src/models/Team.js', () => {
@@ -39,7 +43,12 @@ vi.mock('../../src/models/Team.js', () => {
 vi.mock('../../src/models/User.js', () => ({
   User: {
     findOne: mockUserFindOne,
+    findById: mockUserFindById,
   },
+}));
+
+vi.mock('../../src/services/audit.service.js', () => ({
+  log: mockAuditLog,
 }));
 
 vi.mock('../../src/config/logger.js', () => ({

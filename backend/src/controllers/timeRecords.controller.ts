@@ -119,10 +119,12 @@ export async function remove(req: Request, res: Response, next: NextFunction): P
 export async function approve(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
 
     const record = await timeRecordService.approveTimeRecord(
       req.params.recordId as string,
-      authReq.user.userId
+      authReq.user.userId,
+      teamReq.team.teamId
     );
 
     res.json({ record });
@@ -135,10 +137,12 @@ export async function approve(req: Request, res: Response, next: NextFunction): 
 export async function unapprove(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
 
     const record = await timeRecordService.unapproveTimeRecord(
       req.params.recordId as string,
-      authReq.user.userId
+      authReq.user.userId,
+      teamReq.team.teamId
     );
 
     res.json({ record });
@@ -152,11 +156,13 @@ export async function reject(req: Request, res: Response, next: NextFunction): P
   try {
     const data = rejectSchema.parse(req.body);
     const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
 
     const record = await timeRecordService.rejectTimeRecord(
       req.params.recordId as string,
       authReq.user.userId,
-      data.reason
+      data.reason,
+      teamReq.team.teamId
     );
 
     res.json({ record });

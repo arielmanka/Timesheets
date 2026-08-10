@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import * as projectService from '../services/project.service.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
 import { AppError } from '../utils/errors.js';
 
 // ---------------------------------------------------------------------------
@@ -92,11 +93,13 @@ export async function getOne(req: Request, res: Response, next: NextFunction): P
 export async function update(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = updateProjectSchema.parse(req.body);
+    const authReq = req as AuthenticatedRequest;
     const teamReq = req as unknown as TeamRequest;
     const project = await projectService.updateProject(
       req.params.projectId as string,
       teamReq.team.teamId,
-      data
+      data,
+      authReq.user.userId
     );
     res.json({ project });
   } catch (err) {

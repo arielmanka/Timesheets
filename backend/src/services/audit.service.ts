@@ -1,4 +1,4 @@
-import { AuditLog } from '../models/AuditLog.js';
+import { AuditLog, type IAuditLog } from '../models/AuditLog.js';
 import { logger } from '../config/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,7 @@ export async function getAuditLogs(
     limit?: number;
     skip?: number;
   } = {}
-): Promise<{ logs: unknown[]; total: number }> {
+): Promise<{ logs: IAuditLog[]; total: number }> {
   const filter: Record<string, unknown> = { teamId };
 
   if (options.eventType) filter.eventType = options.eventType;

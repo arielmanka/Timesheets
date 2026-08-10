@@ -23,6 +23,7 @@ const navLinks = computed(() => {
     { name: 'invoices', label: 'Invoices' },
     { name: 'invoicing-pool', label: 'Invoicing Pool', managerOnly: true },
     { name: 'reports', label: 'Reports' },
+    { name: 'audit-log', label: 'Audit Log', managerOnly: true },
     { name: 'team-members', label: 'Members' },
   ]
   return links.filter((l) => !l.managerOnly || team.isManager)

@@ -1,5 +1,6 @@
 import { Team, type ITeam, type TeamRole } from '../models/Team.js';
 import { User } from '../models/User.js';
+import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -266,8 +267,19 @@ export async function setMemberRate(
     throw AppError.notFound('User is not a member of this team');
   }
 
+  const previousRate = member.hourlyRate;
   member.hourlyRate = hourlyRate;
   await team.save();
+
+  if (previousRate !== hourlyRate) {
+    const targetUser = await User.findById(targetUserId);
+    await auditService.log('member_rate_changed', 'TeamMember', targetUserId, teamId, actorId, {
+      targetUserId,
+      targetUserName: targetUser ? `${targetUser.firstName} ${targetUser.lastName}` : 'Unknown user',
+      previousRate,
+      newRate: hourlyRate,
+    });
+  }
 
   logger.info({ teamId, targetUserId, hourlyRate, actorId }, 'Member rate updated');
   return team;

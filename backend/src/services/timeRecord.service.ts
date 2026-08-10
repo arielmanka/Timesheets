@@ -1,7 +1,10 @@
 import { TimeRecord, type ITimeRecord, type TimeRecordStatus } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
+import { Task } from '../models/Task.js';
+import { User } from '../models/User.js';
 import { resolveRate } from './rateResolver.service.js';
 import { getTeamsForUser } from './team.service.js';
+import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -358,6 +361,29 @@ export async function listMyTimeRecordsAcrossTeams(
 }
 
 // ---------------------------------------------------------------------------
+// Denormalized context for a time-record audit entry — captured at write
+// time rather than left as bare IDs, so the audit trail still reads clearly
+// even if the user/project/task is later renamed or deleted (NFR-6).
+// ---------------------------------------------------------------------------
+async function timeRecordAuditDetails(record: ITimeRecord): Promise<Record<string, unknown>> {
+  const [user, project, task] = await Promise.all([
+    User.findById(record.userId),
+    Project.findById(record.projectId),
+    record.taskId ? Task.findById(record.taskId) : Promise.resolve(null),
+  ]);
+  return {
+    userId: record.userId.toString(),
+    userName: user ? `${user.firstName} ${user.lastName}` : 'Unknown user',
+    projectId: record.projectId.toString(),
+    projectName: project?.name ?? 'Unknown project',
+    taskId: record.taskId ? record.taskId.toString() : null,
+    taskName: task?.name ?? null,
+    date: record.date,
+    durationMinutes: record.durationMinutes,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Approve (UA-12, UA-15)
 // Deliberately does NOT enforce UA-18 (manager can't approve their own
 // record unless sole team member) — product direction has ruled that
@@ -365,7 +391,8 @@ export async function listMyTimeRecordsAcrossTeams(
 // ---------------------------------------------------------------------------
 export async function approveTimeRecord(
   recordId: string,
-  managerId: string
+  managerId: string,
+  teamId: string
 ): Promise<ITimeRecord> {
   const record = await TimeRecord.findById(recordId);
   if (!record) {
@@ -384,6 +411,15 @@ export async function approveTimeRecord(
   record.approvedBy = managerId as any;
   await record.save();
 
+  await auditService.log(
+    'time_record_approved',
+    'TimeRecord',
+    recordId,
+    teamId,
+    managerId,
+    await timeRecordAuditDetails(record)
+  );
+
   logger.info({ recordId, managerId }, 'Time record approved');
   return record;
 }
@@ -397,7 +433,8 @@ export async function approveTimeRecord(
 // ---------------------------------------------------------------------------
 export async function unapproveTimeRecord(
   recordId: string,
-  managerId: string
+  managerId: string,
+  teamId: string
 ): Promise<ITimeRecord> {
   const record = await TimeRecord.findById(recordId);
   if (!record) {
@@ -423,6 +460,15 @@ export async function unapproveTimeRecord(
   record.approvedBy = null;
   await record.save();
 
+  await auditService.log(
+    'time_record_unapproved',
+    'TimeRecord',
+    recordId,
+    teamId,
+    managerId,
+    await timeRecordAuditDetails(record)
+  );
+
   logger.info({ recordId, managerId }, 'Time record reverted to pending');
   return record;
 }
@@ -433,7 +479,8 @@ export async function unapproveTimeRecord(
 export async function rejectTimeRecord(
   recordId: string,
   managerId: string,
-  reason: string
+  reason: string,
+  teamId: string
 ): Promise<ITimeRecord> {
   const record = await TimeRecord.findById(recordId);
   if (!record) {
@@ -452,6 +499,11 @@ export async function rejectTimeRecord(
   record.rejectedBy = managerId as any;
   record.rejectionReason = reason;
   await record.save();
+
+  await auditService.log('time_record_rejected', 'TimeRecord', recordId, teamId, managerId, {
+    ...(await timeRecordAuditDetails(record)),
+    reason,
+  });
 
   logger.info({ recordId, managerId, reason }, 'Time record rejected');
   return record;

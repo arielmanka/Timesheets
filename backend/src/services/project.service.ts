@@ -1,5 +1,6 @@
 import { Project, type IProject, type ProjectStatus, type ITaxRule, type IBudget } from '../models/Project.js';
 import { Client } from '../models/Client.js';
+import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -83,12 +84,15 @@ export async function getProjectById(projectId: string, teamId: string): Promise
 export async function updateProject(
   projectId: string,
   teamId: string,
-  data: UpdateProjectData
+  data: UpdateProjectData,
+  actorId: string
 ): Promise<IProject> {
   const project = await Project.findOne({ _id: projectId, teamId });
   if (!project) {
     throw AppError.notFound('Project not found');
   }
+
+  const previousRate = project.hourlyRate;
 
   // Apply partial update
   if (data.name !== undefined) project.name = data.name;
@@ -100,6 +104,14 @@ export async function updateProject(
   if (data.taxRules !== undefined) project.taxRules = data.taxRules;
 
   await project.save();
+
+  if (data.hourlyRate !== undefined && data.hourlyRate !== previousRate) {
+    await auditService.log('project_rate_changed', 'Project', projectId, teamId, actorId, {
+      projectName: project.name,
+      previousRate,
+      newRate: data.hourlyRate,
+    });
+  }
 
   logger.info({ projectId, teamId }, 'Project updated');
   return project;

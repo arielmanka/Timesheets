@@ -131,6 +131,12 @@ export const router = createRouter({
       component: () => import('../views/reports/ReportsView.vue'),
       meta: { requiresAuth: true, requiresTeam: true, layout: 'app' },
     },
+    {
+      path: '/teams/:teamId/audit-log',
+      name: 'audit-log',
+      component: () => import('../views/audit/AuditLogView.vue'),
+      meta: { requiresAuth: true, requiresTeam: true, requiresManager: true, layout: 'app' },
+    },
 
     {
       path: '/:pathMatch(.*)*',

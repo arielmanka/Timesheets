@@ -5,6 +5,7 @@ import * as tasksController from '../../controllers/tasks.controller.js';
 import * as timeRecordsController from '../../controllers/timeRecords.controller.js';
 import * as invoicesController from '../../controllers/invoices.controller.js';
 import * as reportsController from '../../controllers/reports.controller.js';
+import * as auditController from '../../controllers/audit.controller.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireTeamMember, requireManager } from '../../middleware/accessControl.js';
 
@@ -76,5 +77,10 @@ router.get('/:teamId/reports/export/pdf', requireTeamMember, reportsController.e
 router.get('/:teamId/reports/invoices', requireTeamMember, reportsController.invoiceReport);
 router.get('/:teamId/reports/invoices/export/csv', requireTeamMember, reportsController.exportInvoicesCsv);
 router.get('/:teamId/reports/invoices/export/pdf', requireTeamMember, reportsController.exportInvoicesPdf);
+
+// ---------------------------------------------------------------------------
+// Audit log routes — nested under /teams/:teamId/audit-log (NFR-6)
+// ---------------------------------------------------------------------------
+router.get('/:teamId/audit-log', requireManager, auditController.list);
 
 export { router as cptRouter };

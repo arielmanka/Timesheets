@@ -1,5 +1,6 @@
 import { Task, type ITask, type TaskStatus } from '../models/Task.js';
 import { Project } from '../models/Project.js';
+import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -77,12 +78,16 @@ export async function getTaskById(taskId: string, projectId: string): Promise<IT
 export async function updateTask(
   taskId: string,
   projectId: string,
-  data: UpdateTaskData
+  data: UpdateTaskData,
+  teamId: string,
+  actorId: string
 ): Promise<ITask> {
   const task = await Task.findOne({ _id: taskId, projectId });
   if (!task) {
     throw AppError.notFound('Task not found');
   }
+
+  const previousRate = task.hourlyRate;
 
   if (data.name !== undefined) task.name = data.name;
   if (data.description !== undefined) task.description = data.description;
@@ -91,6 +96,17 @@ export async function updateTask(
   if (data.hourlyRate !== undefined) task.hourlyRate = data.hourlyRate;
 
   await task.save();
+
+  if (data.hourlyRate !== undefined && data.hourlyRate !== previousRate) {
+    const project = await Project.findById(projectId);
+    await auditService.log('task_rate_changed', 'Task', taskId, teamId, actorId, {
+      taskName: task.name,
+      projectId,
+      projectName: project?.name ?? 'Unknown project',
+      previousRate,
+      newRate: data.hourlyRate,
+    });
+  }
 
   logger.info({ taskId, projectId }, 'Task updated');
   return task;
