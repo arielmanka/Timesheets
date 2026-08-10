@@ -46,6 +46,8 @@ const eligibleRecords = ref<TimeRecord[]>([])
 const selectedRecordIds = ref<Set<string>>(new Set())
 const notes = ref('')
 const manualItems = ref<ManualItemInput[]>([])
+const taxName = ref('')
+const taxRate = ref<number | null>(null)
 
 function openWizard(): void {
   step.value = 1
@@ -54,7 +56,24 @@ function openWizard(): void {
   selectedRecordIds.value = new Set()
   notes.value = ''
   manualItems.value = []
+  taxName.value = ''
+  taxRate.value = null
   showWizard.value = true
+}
+
+const subtotalPreview = computed(() => {
+  const recordsTotal = eligibleRecords.value
+    .filter((r) => selectedRecordIds.value.has(r._id))
+    .reduce((sum, r) => sum + r.calculatedCost, 0)
+  const manualTotal = manualItems.value.reduce((sum, m) => sum + (m.amount || 0), 0)
+  return Math.round((recordsTotal + manualTotal) * 100) / 100
+})
+const taxPreview = computed(() => Math.round(subtotalPreview.value * ((taxRate.value ?? 0) / 100) * 100) / 100)
+const grossPreview = computed(() => Math.round((subtotalPreview.value + taxPreview.value) * 100) / 100)
+const previewCurrency = computed(() => eligibleRecords.value[0]?.currency ?? '')
+
+function applyTaxPreset(name: string): void {
+  taxName.value = name
 }
 
 const { loading: loadingEligible, run: goToStep2 } = useAsyncAction(async () => {
@@ -87,6 +106,7 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
     timeRecordIds: Array.from(selectedRecordIds.value),
     notes: notes.value || null,
     manualItems: manualItems.value.filter((m) => m.description.trim() !== ''),
+    taxRules: taxName.value.trim() && taxRate.value ? [{ name: taxName.value.trim(), rate: taxRate.value }] : [],
   })
   ui.success(`Invoice #${invoice.invoiceNumber} created as a draft.`)
   showWizard.value = false
@@ -166,6 +186,50 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
             <AppButton variant="secondary" @click="addManualItem">Add item</AppButton>
           </div>
         </fieldset>
+
+        <fieldset class="rounded-md border border-surface-200 p-3">
+          <legend class="px-1 text-xs font-medium text-surface-500">Tax</legend>
+          <div class="space-y-2">
+            <div class="flex gap-2">
+              <button
+                v-for="preset in ['VAT', 'GST', 'HST']"
+                :key="preset"
+                type="button"
+                class="rounded border border-surface-300 px-2 py-1 text-xs text-surface-600 hover:border-primary-300"
+                @click="applyTaxPreset(preset)"
+              >
+                {{ preset }}
+              </button>
+            </div>
+            <div class="flex items-center gap-2">
+              <input v-model="taxName" placeholder="Tax name (e.g. VAT)" class="field-control" />
+              <input
+                v-model.number="taxRate"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                placeholder="Rate %"
+                class="field-control w-28"
+              />
+            </div>
+          </div>
+        </fieldset>
+
+        <div class="rounded-md bg-surface-50 p-3 text-sm">
+          <div class="flex justify-between text-surface-600">
+            <span>Subtotal</span>
+            <span class="tabular-nums">{{ previewCurrency }} {{ subtotalPreview.toFixed(2) }}</span>
+          </div>
+          <div v-if="taxRate" class="flex justify-between text-surface-600">
+            <span>{{ taxName || 'Tax' }} ({{ taxRate }}%)</span>
+            <span class="tabular-nums">{{ previewCurrency }} {{ taxPreview.toFixed(2) }}</span>
+          </div>
+          <div class="mt-1 flex justify-between border-t border-surface-200 pt-1 font-semibold text-surface-900">
+            <span>Total</span>
+            <span class="tabular-nums">{{ previewCurrency }} {{ grossPreview.toFixed(2) }}</span>
+          </div>
+        </div>
       </div>
 
       <template #footer>

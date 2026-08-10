@@ -7,7 +7,11 @@ export interface LineItem {
   description: string
   hours: number
   rate: number
+  /** Gross amount. For a collective invoice's rolled-up personal-invoice line, this is that invoice's own gross total. */
   amount: number
+  /** Net (pre-tax) amount and the VAT rate charged — set only on a collective invoice's rolled-up personal-invoice lines. */
+  netAmount: number | null
+  taxRate: number | null
   timeRecordId: ID | null
   personalInvoiceId: ID | null
 }
@@ -25,7 +29,8 @@ export interface TaxEntry {
 
 export interface Invoice {
   _id: ID
-  invoiceNumber: number
+  /** Format: yyyymmdd-NNNNNN (creation date + a never-resetting 6-digit per-team sequence). */
+  invoiceNumber: string
   type: InvoiceType
   teamId: ID
   /** Personal invoices only — collective invoices span every project a client has. */
@@ -58,11 +63,17 @@ export interface ManualItemInput {
   amount: number
 }
 
+export interface TaxRuleInput {
+  name: string
+  rate: number
+}
+
 export interface CreatePersonalInvoiceInput {
   projectId: string
   timeRecordIds: string[]
   notes?: string | null
   manualItems?: ManualItemInput[]
+  taxRules?: TaxRuleInput[]
 }
 
 export interface CreateCollectiveInvoiceInput {
@@ -76,6 +87,7 @@ export interface CreateCollectiveInvoiceInput {
 export interface UpdateInvoiceDraftInput {
   notes?: string | null
   manualItems?: ManualItemInput[]
+  taxRules?: TaxRuleInput[]
 }
 
 export interface ListInvoicesFilter {

@@ -10,7 +10,16 @@ export interface ILineItem {
   description: string;
   hours: number;
   rate: number;
+  // Gross amount for this line. For a rolled-up personal-invoice line on a
+  // collective invoice, this is that personal invoice's own gross total
+  // (net + its own tax) — each pooled invoice keeps the VAT rate its owner
+  // charged, rather than the collective invoice applying one rate to all.
   amount: number;
+  // Net (pre-tax) amount and the tax rate charged, set only on a collective
+  // invoice's rolled-up personal-invoice line items; null for ordinary
+  // time-record line items, which aren't individually taxed.
+  netAmount: number | null;
+  taxRate: number | null;
   timeRecordId: Types.ObjectId | null;
   // Set only on a collective invoice's line item that represents a rolled-up
   // personal invoice — lets removePersonalInvoiceFromPool find and drop the
@@ -30,7 +39,9 @@ export interface ITaxEntry {
 }
 
 export interface IInvoice extends Document {
-  invoiceNumber: number;
+  // Format: yyyymmdd-NNNNNN — creation date + a 6-digit, zero-padded,
+  // never-resetting per-team sequence number (e.g. "20260810-000004").
+  invoiceNumber: string;
   type: InvoiceType;
   teamId: Types.ObjectId;
   // Required for personal invoices (billed against one project); null for
@@ -71,6 +82,8 @@ const lineItemSchema = new Schema<ILineItem>(
     hours: { type: Number, required: true },
     rate: { type: Number, required: true },
     amount: { type: Number, required: true },
+    netAmount: { type: Number, default: null },
+    taxRate: { type: Number, default: null },
     timeRecordId: { type: Schema.Types.ObjectId, ref: 'TimeRecord', default: null },
     personalInvoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice', default: null },
   },
@@ -108,7 +121,7 @@ const invoiceSchema = new Schema<IInvoice>(
     // per-team (InvoiceCounter is keyed by teamId), so uniqueness must be
     // scoped the same way or two teams' first invoices collide.
     invoiceNumber: {
-      type: Number,
+      type: String,
       required: true,
     },
     type: {

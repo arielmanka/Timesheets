@@ -1,7 +1,14 @@
 import type { Request, Response, NextFunction } from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import * as reportService from '../services/report.service.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
+
+// See invoices.controller.ts — PDFKit's built-in fonts don't cover Polish
+// (or other Latin-Extended-A) characters; DejaVu Sans is embedded instead.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FONT_REGULAR = path.join(__dirname, '../assets/fonts/DejaVuSans.ttf');
 
 // ---------------------------------------------------------------------------
 // Controllers
@@ -83,6 +90,8 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
 
     const PDFDocument = (await import('pdfkit')).default;
     const doc = new PDFDocument({ margin: 50 });
+    doc.registerFont('Body', FONT_REGULAR);
+    doc.font('Body');
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="report.pdf"');

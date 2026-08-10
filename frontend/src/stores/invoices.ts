@@ -71,6 +71,12 @@ export const useInvoicesStore = defineStore('invoices', () => {
     return invoice
   }
 
+  async function revertToDraft(teamId: string, invoiceId: string): Promise<Invoice> {
+    const invoice = await invoicesService.revertInvoiceToDraft(teamId, invoiceId)
+    replace(invoice)
+    return invoice
+  }
+
   async function recordPayment(teamId: string, invoiceId: string, amount: number, date: string): Promise<Invoice> {
     const invoice = await invoicesService.recordInvoicePayment(teamId, invoiceId, amount, date)
     replace(invoice)
@@ -101,6 +107,7 @@ export const useInvoicesStore = defineStore('invoices', () => {
     addToPool,
     removeFromPool,
     send,
+    revertToDraft,
     recordPayment,
     reset,
   }

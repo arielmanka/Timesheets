@@ -10,5 +10,6 @@ router.use(authenticate);
 router.get('/me', usersController.getProfile);
 router.patch('/me', usersController.updateProfile);
 router.delete('/me', usersController.requestDeletion);
+router.get('/me/time-records', usersController.listMyTimeRecords);
 
 export { router as usersRouter };

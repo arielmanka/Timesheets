@@ -1,11 +1,21 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import * as invoiceService from '../services/invoice.service.js';
 import { Client } from '../models/Client.js';
 import { User } from '../models/User.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
 import { AppError } from '../utils/errors.js';
+
+// PDFKit's built-in Helvetica/Times/Courier fonts only support WinAnsi
+// encoding (~Latin-1) — Polish and other Latin-Extended-A characters (ą, ć,
+// ę, ł, ń, ó, ś, ź, ż, …) render as garbage. DejaVu Sans has full Unicode
+// coverage and is embedded directly in the exported PDF.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FONT_REGULAR = path.join(__dirname, '../assets/fonts/DejaVuSans.ttf');
+const FONT_BOLD = path.join(__dirname, '../assets/fonts/DejaVuSans-Bold.ttf');
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -15,11 +25,17 @@ const manualItemSchema = z.object({
   amount: z.number(),
 });
 
+const taxRuleSchema = z.object({
+  name: z.string().min(1).max(50),
+  rate: z.number().min(0).max(100),
+});
+
 const createPersonalSchema = z.object({
   projectId: z.string().min(1, 'Project ID is required'),
   timeRecordIds: z.array(z.string()).min(1, 'At least one time record is required'),
   notes: z.string().max(5000).nullable().optional(),
   manualItems: z.array(manualItemSchema).optional(),
+  taxRules: z.array(taxRuleSchema).optional(),
 });
 
 const createCollectiveSchema = z.object({
@@ -36,6 +52,7 @@ const createCollectiveSchema = z.object({
 const updateDraftSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   manualItems: z.array(manualItemSchema).optional(),
+  taxRules: z.array(taxRuleSchema).optional(),
 });
 
 const recordPaymentSchema = z.object({
@@ -230,6 +247,23 @@ export async function send(req: Request, res: Response, next: NextFunction): Pro
   }
 }
 
+// POST /teams/:teamId/invoices/:invoiceId/revert-to-draft
+export async function revertToDraft(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const invoice = await invoiceService.revertPersonalInvoiceToDraft(
+      req.params.invoiceId as string,
+      teamReq.team.teamId,
+      authReq.user.userId,
+      teamReq.team.role === 'manager'
+    );
+    res.json({ invoice });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // POST /teams/:teamId/invoices/:invoiceId/payment
 export async function recordPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -261,7 +295,12 @@ async function resolveHeaderDetails(clientId: unknown, createdBy: unknown) {
     clientAddress: client?.billingAddress ?? null,
     clientContact: client?.billingContact ?? null,
     clientEmail: client?.billingEmail ?? null,
+    clientTaxId: client?.taxId ?? null,
     preparerName: preparer ? `${preparer.firstName} ${preparer.lastName}` : 'Unknown',
+    // Only a contractor with a complete profile gets a "from" company block —
+    // an employee's invoice simply has no incorporation section.
+    preparerIncorporation:
+      preparer?.employmentType === 'contractor' && preparer.incorporation ? preparer.incorporation : null,
   };
 }
 
@@ -273,37 +312,57 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       req.params.invoiceId as string,
       teamReq.team.teamId
     );
-    const { clientName, preparerName } = await resolveHeaderDetails(invoice.clientId, invoice.createdBy);
+    const { clientName, clientTaxId, preparerName, preparerIncorporation } = await resolveHeaderDetails(
+      invoice.clientId,
+      invoice.createdBy
+    );
 
     const { stringify } = await import('csv-stringify/sync');
+
+    // A collective invoice has no tax rate of its own — each line item is a
+    // pooled personal invoice, at that person's own VAT rate — so it gets
+    // VAT/Net/Gross columns instead of the personal invoice's Rate/Amount.
+    const isCollective = invoice.type === 'collective';
+    const blankRow = isCollective
+      ? { Description: '', Hours: '', VAT: '', Net: '', Gross: '' }
+      : { Description: '', Hours: '', Rate: '', Amount: '' };
+    const metaRow = (description: string) => ({ ...blankRow, Description: description });
+
     const header = [
-      { Description: `Invoice #${invoice.invoiceNumber}`, Hours: '', Rate: '', Amount: '' },
-      { Description: `Client: ${clientName}`, Hours: '', Rate: '', Amount: '' },
-      { Description: `Prepared by: ${preparerName}`, Hours: '', Rate: '', Amount: '' },
-      ...(invoice.period
-        ? [{
-            Description: `Period: ${invoice.period.startDate.toISOString().slice(0, 10)} – ${invoice.period.endDate.toISOString().slice(0, 10)}`,
-            Hours: '',
-            Rate: '',
-            Amount: '',
-          }]
+      metaRow(`Invoice #${invoice.invoiceNumber}`),
+      metaRow(`Client: ${clientName}`),
+      ...(clientTaxId ? [metaRow(`Client Tax ID: ${clientTaxId}`)] : []),
+      metaRow(`Prepared by: ${preparerName}`),
+      ...(preparerIncorporation
+        ? [metaRow(`From: ${preparerIncorporation.companyName}`), metaRow(`Tax ID: ${preparerIncorporation.taxId}`)]
         : []),
-      { Description: '', Hours: '', Rate: '', Amount: '' },
+      ...(invoice.period
+        ? [
+            metaRow(
+              `Period: ${invoice.period.startDate.toISOString().slice(0, 10)} – ${invoice.period.endDate.toISOString().slice(0, 10)}`
+            ),
+          ]
+        : []),
+      blankRow,
     ];
-    const rows = invoice.lineItems.map((item) => ({
-      Description: item.description,
-      Hours: item.hours,
-      Rate: item.rate,
-      Amount: item.amount,
-    }));
+    const rows = invoice.lineItems.map((item) =>
+      isCollective
+        ? {
+            Description: item.description,
+            Hours: item.hours,
+            VAT: `${item.taxRate ?? 0}%`,
+            Net: item.netAmount ?? item.amount,
+            Gross: item.amount,
+          }
+        : { Description: item.description, Hours: item.hours, Rate: item.rate, Amount: item.amount }
+    );
 
     for (const item of invoice.manualItems) {
-      rows.push({
-        Description: item.description,
-        Hours: 0,
-        Rate: 0,
-        Amount: item.amount,
-      });
+      rows.push(
+        isCollective
+          ? { Description: item.description, Hours: 0, VAT: '', Net: item.amount, Gross: item.amount }
+          : { Description: item.description, Hours: 0, Rate: 0, Amount: item.amount }
+      );
     }
 
     const csv = stringify([...header, ...rows], { header: true });
@@ -324,13 +383,14 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       req.params.invoiceId as string,
       teamReq.team.teamId
     );
-    const { clientName, clientAddress, clientContact, clientEmail, preparerName } = await resolveHeaderDetails(
-      invoice.clientId,
-      invoice.createdBy
-    );
+    const { clientName, clientAddress, clientContact, clientEmail, clientTaxId, preparerName, preparerIncorporation } =
+      await resolveHeaderDetails(invoice.clientId, invoice.createdBy);
 
     const PDFDocument = (await import('pdfkit')).default;
     const doc = new PDFDocument({ margin: 50 });
+    doc.registerFont('Body', FONT_REGULAR);
+    doc.registerFont('Body-Bold', FONT_BOLD);
+    doc.font('Body');
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`);
@@ -348,9 +408,9 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     }
 
     let leftY = 50;
-    doc.font('Helvetica-Bold').fontSize(11).text('Bill to', 50, leftY, { width: 240 });
+    doc.font('Body-Bold').fontSize(11).text('Bill to', 50, leftY, { width: 240 });
     leftY += 16;
-    doc.font('Helvetica').fontSize(10);
+    doc.font('Body').fontSize(10);
     for (const line of [
       clientName,
       clientContact,
@@ -359,47 +419,85 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       clientAddress ? `${clientAddress.city}, ${clientAddress.state} ${clientAddress.postalCode}` : undefined,
       clientAddress?.country,
       clientEmail,
+      clientTaxId ? `Tax ID: ${clientTaxId}` : undefined,
     ]) {
       if (!line) continue;
       doc.text(line, 50, leftY, { width: 240 });
       leftY += 14;
     }
     leftY += 6;
-    doc.font('Helvetica-Bold').fontSize(11).text('Prepared by', 50, leftY, { width: 240 });
+    doc.font('Body-Bold').fontSize(11).text('Prepared by', 50, leftY, { width: 240 });
     leftY += 16;
-    doc.font('Helvetica').fontSize(10).text(preparerName, 50, leftY, { width: 240 });
+    doc.font('Body').fontSize(10);
+    doc.text(preparerName, 50, leftY, { width: 240 });
+    leftY += 14;
 
-    doc.y = Math.max(leftY + 14, invoice.period ? 144 : 130);
+    if (preparerIncorporation) {
+      const addr = preparerIncorporation.address;
+      for (const line of [
+        preparerIncorporation.companyName,
+        addr.line1,
+        addr.line2,
+        `${addr.city}, ${addr.state} ${addr.postalCode}`,
+        addr.country,
+        `Tax ID: ${preparerIncorporation.taxId}`,
+      ]) {
+        if (!line) continue;
+        doc.text(line, 50, leftY, { width: 240 });
+        leftY += 14;
+      }
+    }
+
+    doc.y = Math.max(leftY + 10, invoice.period ? 144 : 130);
     doc.moveDown(1.5);
 
     // Line items table
-    doc.fontSize(12).font('Helvetica-Bold').text('Line Items', { underline: true });
-    doc.font('Helvetica').moveDown(0.5);
+    doc.fontSize(12).font('Body-Bold').text('Line Items', { underline: true });
+    doc.font('Body').moveDown(0.5);
+
+    // A collective invoice has no tax rate of its own — each line item is a
+    // pooled personal invoice at that person's own VAT rate — so it gets
+    // VAT/Net/Gross columns instead of the personal invoice's Rate/Amount.
+    const isCollective = invoice.type === 'collective';
 
     doc.fontSize(9);
     const tableTop = doc.y;
     doc.text('Description', 50, tableTop);
-    doc.text('Hours', 300, tableTop, { width: 60, align: 'right' });
-    doc.text('Rate', 370, tableTop, { width: 60, align: 'right' });
-    doc.text('Amount', 440, tableTop, { width: 80, align: 'right' });
+    doc.text('Hours', isCollective ? 250 : 300, tableTop, { width: 50, align: 'right' });
+    if (isCollective) {
+      doc.text('VAT', 310, tableTop, { width: 50, align: 'right' });
+      doc.text('Net', 370, tableTop, { width: 70, align: 'right' });
+      doc.text('Gross', 450, tableTop, { width: 70, align: 'right' });
+    } else {
+      doc.text('Rate', 370, tableTop, { width: 60, align: 'right' });
+      doc.text('Amount', 440, tableTop, { width: 80, align: 'right' });
+    }
 
     doc.moveTo(50, tableTop + 15).lineTo(520, tableTop + 15).stroke();
 
     let y = tableTop + 20;
     for (const item of invoice.lineItems) {
-      doc.text(item.description, 50, y, { width: 240 });
-      doc.text(item.hours.toFixed(2), 300, y, { width: 60, align: 'right' });
-      doc.text(item.rate.toFixed(2), 370, y, { width: 60, align: 'right' });
-      doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+      doc.text(item.description, 50, y, { width: isCollective ? 190 : 240 });
+      doc.text(item.hours.toFixed(2), isCollective ? 250 : 300, y, { width: 50, align: 'right' });
+      if (isCollective) {
+        doc.text(`${item.taxRate ?? 0}%`, 310, y, { width: 50, align: 'right' });
+        doc.text((item.netAmount ?? item.amount).toFixed(2), 370, y, { width: 70, align: 'right' });
+        doc.text(item.amount.toFixed(2), 450, y, { width: 70, align: 'right' });
+      } else {
+        doc.text(item.rate.toFixed(2), 370, y, { width: 60, align: 'right' });
+        doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+      }
       y += 18;
     }
 
     // Manual items
     for (const item of invoice.manualItems) {
-      doc.text(item.description, 50, y, { width: 240 });
-      doc.text('', 300, y, { width: 60 });
-      doc.text('', 370, y, { width: 60 });
-      doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+      doc.text(item.description, 50, y, { width: isCollective ? 190 : 240 });
+      if (isCollective) {
+        doc.text(item.amount.toFixed(2), 450, y, { width: 70, align: 'right' });
+      } else {
+        doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+      }
       y += 18;
     }
 
@@ -418,14 +516,14 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       y += 18;
     }
 
-    doc.fontSize(12).font('Helvetica-Bold');
+    doc.fontSize(12).font('Body-Bold');
     doc.text('Total:', 300, y, { width: 130, align: 'right' });
     doc.text(`${invoice.currency} ${invoice.total.toFixed(2)}`, 440, y, { width: 80, align: 'right' });
 
     // Notes
     if (invoice.notes) {
       doc.moveDown(3);
-      doc.font('Helvetica').fontSize(10);
+      doc.font('Body').fontSize(10);
       doc.text('Notes:', { underline: true });
       doc.text(invoice.notes);
     }

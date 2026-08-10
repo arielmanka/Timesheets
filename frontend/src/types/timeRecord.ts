@@ -60,10 +60,19 @@ export interface TimeRecordUpdateInput {
 export interface ListTimeRecordsFilter {
   userId?: string
   projectId?: string
+  taskId?: string
   clientId?: string
   startDate?: string
   endDate?: string
   status?: TimeRecordStatus
   billable?: boolean
   invoiced?: boolean
+}
+
+/** One of the current user's own time records, annotated with which team/project it belongs to — from the cross-team "Show all teams" view. */
+export interface CrossTeamTimeRecord {
+  record: TimeRecord
+  teamId: string
+  teamName: string
+  projectName: string
 }

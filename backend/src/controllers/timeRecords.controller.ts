@@ -63,6 +63,7 @@ export async function list(req: Request, res: Response, next: NextFunction): Pro
     const filter: timeRecordService.ListTimeRecordsFilter = {};
     if (req.query.userId) filter.userId = req.query.userId as string;
     if (req.query.projectId) filter.projectId = req.query.projectId as string;
+    if (req.query.taskId) filter.taskId = req.query.taskId as string;
     if (req.query.clientId) filter.clientId = req.query.clientId as string;
     if (req.query.startDate) filter.startDate = new Date(req.query.startDate as string);
     if (req.query.endDate) filter.endDate = new Date(req.query.endDate as string);
@@ -120,6 +121,22 @@ export async function approve(req: Request, res: Response, next: NextFunction): 
     const authReq = req as AuthenticatedRequest;
 
     const record = await timeRecordService.approveTimeRecord(
+      req.params.recordId as string,
+      authReq.user.userId
+    );
+
+    res.json({ record });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// POST /teams/:teamId/time-records/:recordId/unapprove
+export async function unapprove(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+
+    const record = await timeRecordService.unapproveTimeRecord(
       req.params.recordId as string,
       authReq.user.userId
     );

@@ -70,6 +70,16 @@ const isOwnPersonalDraft = computed(
 const isManagedCollectiveDraft = computed(
   () => isDraft.value && invoice.value?.type === 'collective' && team.isManager
 )
+// A sent personal invoice can go back to draft — but only its owner or a
+// manager, and only while it hasn't been pulled into a collective invoice's
+// pool (that pool is relying on it staying sent).
+const canRevertToDraft = computed(
+  () =>
+    invoice.value?.type === 'personal' &&
+    invoice.value?.status === 'sent' &&
+    !invoice.value?.includedInCollectiveInvoiceId &&
+    (invoice.value?.createdBy === auth.user?._id || team.isManager)
+)
 // Derived pool-status label — never stored on the invoice's own `status`.
 const poolStatusLabel = computed(() => {
   if (!invoice.value?.includedInCollectiveInvoiceId || !poolInvoice.value) return null
@@ -123,14 +133,19 @@ const { loading: unpoolingInvoice, run: handleRemoveFromPool } = useAsyncAction(
   ui.success('Removed from pool.')
 })
 
-// --- Edit draft (notes / manual items) --------------------------------
+// --- Edit draft (notes / manual items / tax) --------------------------------
 const showEdit = ref(false)
 const editNotes = ref('')
 const editManualItems = ref<ManualItemInput[]>([])
+const editTaxName = ref('')
+const editTaxRate = ref<number | null>(null)
 function openEdit(): void {
   if (!invoice.value) return
   editNotes.value = invoice.value.notes ?? ''
   editManualItems.value = invoice.value.manualItems.map((m) => ({ ...m }))
+  const currentTax = invoice.value.taxes[0]
+  editTaxName.value = currentTax?.name ?? ''
+  editTaxRate.value = currentTax?.rate ?? null
   showEdit.value = true
 }
 function addManualItem(): void {
@@ -140,9 +155,16 @@ function removeManualItem(i: number): void {
   editManualItems.value.splice(i, 1)
 }
 const { loading: saving, run: saveEdit } = useAsyncAction(async () => {
+  // A collective invoice has no tax rate of its own — each pooled personal
+  // invoice keeps the one its owner charged — so taxRules only applies here
+  // for a personal invoice draft.
+  const isPersonal = invoice.value?.type === 'personal'
   invoice.value = await invoices.updateDraft(teamId, invoiceId, {
     notes: editNotes.value || null,
     manualItems: editManualItems.value.filter((m) => m.description.trim() !== ''),
+    ...(isPersonal
+      ? { taxRules: editTaxName.value.trim() && editTaxRate.value ? [{ name: editTaxName.value.trim(), rate: editTaxRate.value }] : [] }
+      : {}),
   })
   showEdit.value = false
   ui.success('Draft updated.')
@@ -161,6 +183,14 @@ const { loading: deleting, run: deleteDraft } = useAsyncAction(async () => {
 const { loading: sending, run: send } = useAsyncAction(async () => {
   invoice.value = await invoices.send(teamId, invoiceId)
   ui.success('Invoice sent.')
+})
+
+// --- Revert to draft ---------------------------------------------------
+const showRevertConfirm = ref(false)
+const { loading: reverting, run: revertToDraft } = useAsyncAction(async () => {
+  invoice.value = await invoices.revertToDraft(teamId, invoiceId)
+  showRevertConfirm.value = false
+  ui.success('Reverted to draft.')
 })
 
 // --- Record payment ----------------------------------------------------
@@ -223,15 +253,57 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
     <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
       <table class="w-full text-sm">
         <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
-          <tr>
+          <tr v-if="invoice.type === 'collective'">
+            <th class="px-4 py-2 font-medium">Description</th>
+            <th class="px-4 py-2 text-right font-medium">Hours</th>
+            <th class="px-4 py-2 text-right font-medium">VAT</th>
+            <th class="px-4 py-2 text-right font-medium">Net</th>
+            <th class="px-4 py-2 text-right font-medium">Gross</th>
+            <th v-if="isManagedCollectiveDraft" class="px-4 py-2"></th>
+          </tr>
+          <tr v-else>
             <th class="px-4 py-2 font-medium">Description</th>
             <th class="px-4 py-2 text-right font-medium">Hours</th>
             <th class="px-4 py-2 text-right font-medium">Rate</th>
             <th class="px-4 py-2 text-right font-medium">Amount</th>
-            <th v-if="isOwnPersonalDraft || isManagedCollectiveDraft" class="px-4 py-2"></th>
+            <th v-if="isOwnPersonalDraft" class="px-4 py-2"></th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-surface-100">
+        <tbody class="divide-y divide-surface-100" v-if="invoice.type === 'collective'">
+          <tr v-for="(item, i) in invoice.lineItems" :key="`li-${i}`">
+            <td class="px-4 py-2">{{ item.description }}</td>
+            <td class="px-4 py-2 text-right tabular-nums">{{ item.hours.toFixed(2) }}</td>
+            <td class="px-4 py-2 text-right tabular-nums">{{ item.taxRate ?? 0 }}%</td>
+            <td class="px-4 py-2 text-right tabular-nums">
+              <CurrencyDisplay :amount="item.netAmount ?? item.amount" :currency="invoice.currency" />
+            </td>
+            <td class="px-4 py-2 text-right tabular-nums">
+              <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
+            </td>
+            <td class="px-4 py-2 text-right">
+              <button
+                v-if="isManagedCollectiveDraft && item.personalInvoiceId"
+                type="button"
+                class="text-xs font-medium text-danger-600 hover:underline"
+                :disabled="unpoolingInvoice"
+                @click="handleRemoveFromPool(item.personalInvoiceId)"
+              >
+                Remove from pool
+              </button>
+            </td>
+          </tr>
+          <tr v-for="(item, i) in invoice.manualItems" :key="`mi-${i}`">
+            <td class="px-4 py-2">{{ item.description }}</td>
+            <td class="px-4 py-2 text-right text-surface-300">—</td>
+            <td class="px-4 py-2 text-right text-surface-300">—</td>
+            <td class="px-4 py-2 text-right text-surface-300">—</td>
+            <td class="px-4 py-2 text-right tabular-nums">
+              <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
+            </td>
+            <td v-if="isManagedCollectiveDraft" class="px-4 py-2"></td>
+          </tr>
+        </tbody>
+        <tbody class="divide-y divide-surface-100" v-else>
           <tr v-for="(item, i) in invoice.lineItems" :key="`li-${i}`">
             <td class="px-4 py-2">{{ item.description }}</td>
             <td class="px-4 py-2 text-right tabular-nums">{{ item.hours.toFixed(2) }}</td>
@@ -249,15 +321,6 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
               >
                 Remove
               </button>
-              <button
-                v-if="isManagedCollectiveDraft && item.personalInvoiceId"
-                type="button"
-                class="text-xs font-medium text-danger-600 hover:underline"
-                :disabled="unpoolingInvoice"
-                @click="handleRemoveFromPool(item.personalInvoiceId)"
-              >
-                Remove from pool
-              </button>
             </td>
           </tr>
           <tr v-for="(item, i) in invoice.manualItems" :key="`mi-${i}`">
@@ -267,27 +330,27 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
             <td class="px-4 py-2 text-right tabular-nums">
               <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
             </td>
-            <td v-if="isOwnPersonalDraft || isManagedCollectiveDraft" class="px-4 py-2"></td>
+            <td v-if="isOwnPersonalDraft" class="px-4 py-2"></td>
           </tr>
         </tbody>
         <tfoot class="border-t border-surface-200 text-sm">
           <tr>
-            <td colspan="3" class="px-4 py-1.5 text-right text-surface-500">Subtotal</td>
+            <td :colspan="invoice.type === 'collective' ? 4 : 3" class="px-4 py-1.5 text-right text-surface-500">Subtotal</td>
             <td class="px-4 py-1.5 text-right tabular-nums"><CurrencyDisplay :amount="invoice.subtotal" :currency="invoice.currency" /></td>
             <td v-if="isOwnPersonalDraft || isManagedCollectiveDraft"></td>
           </tr>
           <tr v-for="tax in invoice.taxes" :key="tax.name">
-            <td colspan="3" class="px-4 py-1.5 text-right text-surface-500">{{ tax.name }} ({{ tax.rate }}%)</td>
+            <td :colspan="invoice.type === 'collective' ? 4 : 3" class="px-4 py-1.5 text-right text-surface-500">{{ tax.name }} ({{ tax.rate }}%)</td>
             <td class="px-4 py-1.5 text-right tabular-nums"><CurrencyDisplay :amount="tax.amount" :currency="invoice.currency" /></td>
             <td v-if="isOwnPersonalDraft || isManagedCollectiveDraft"></td>
           </tr>
           <tr class="font-semibold text-surface-900">
-            <td colspan="3" class="px-4 py-2 text-right">Total</td>
+            <td :colspan="invoice.type === 'collective' ? 4 : 3" class="px-4 py-2 text-right">Total</td>
             <td class="px-4 py-2 text-right tabular-nums"><CurrencyDisplay :amount="invoice.total" :currency="invoice.currency" /></td>
             <td v-if="isOwnPersonalDraft || isManagedCollectiveDraft"></td>
           </tr>
           <tr v-if="invoice.partialPaymentAmount !== null" class="text-success-600">
-            <td colspan="3" class="px-4 py-1.5 text-right">Paid</td>
+            <td :colspan="invoice.type === 'collective' ? 4 : 3" class="px-4 py-1.5 text-right">Paid</td>
             <td class="px-4 py-1.5 text-right tabular-nums">
               <CurrencyDisplay :amount="invoice.partialPaymentAmount" :currency="invoice.currency" />
             </td>
@@ -326,7 +389,8 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
       <ul v-else class="space-y-1 rounded-md border border-surface-200 p-2">
         <li v-for="pi in eligiblePersonalInvoices" :key="pi._id" class="flex items-center justify-between text-sm">
           <span class="text-surface-700">
-            #{{ pi.invoiceNumber }} · <CurrencyDisplay :amount="pi.total" :currency="pi.currency" />
+            {{ pi.invoiceNumber }} · VAT {{ pi.taxes[0]?.rate ?? 0 }}% ·
+            <CurrencyDisplay :amount="pi.total" :currency="pi.currency" />
           </span>
           <AppButton variant="ghost" :loading="poolingInvoice" @click="handleAddToPool(pi._id)">Add to pool</AppButton>
         </li>
@@ -348,6 +412,9 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
       >
         Record payment
       </AppButton>
+      <AppButton v-if="canRevertToDraft" variant="secondary" @click="showRevertConfirm = true">
+        Revert to draft
+      </AppButton>
     </div>
 
     <Modal v-if="showEdit" title="Edit draft" @close="showEdit = false">
@@ -364,6 +431,21 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
               <AppButton variant="ghost" @click="removeManualItem(i)">Remove</AppButton>
             </div>
             <AppButton variant="secondary" @click="addManualItem">Add item</AppButton>
+          </div>
+        </fieldset>
+        <fieldset v-if="invoice.type === 'personal'" class="rounded-md border border-surface-200 p-3">
+          <legend class="px-1 text-xs font-medium text-surface-500">Tax</legend>
+          <div class="flex items-center gap-2">
+            <input v-model="editTaxName" placeholder="Tax name (e.g. VAT)" class="field-control" />
+            <input
+              v-model.number="editTaxRate"
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              placeholder="Rate %"
+              class="field-control w-28"
+            />
           </div>
         </fieldset>
       </form>
@@ -397,6 +479,16 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
       :loading="deleting"
       @confirm="deleteDraft"
       @cancel="showDeleteConfirm = false"
+    />
+
+    <ConfirmDialog
+      v-if="showRevertConfirm"
+      title="Revert to draft"
+      message="This moves the invoice back to draft so it can be edited again. Its time records stay attached. Continue?"
+      confirm-label="Revert to draft"
+      :loading="reverting"
+      @confirm="revertToDraft"
+      @cancel="showRevertConfirm = false"
     />
   </div>
 </template>

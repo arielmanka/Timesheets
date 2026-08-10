@@ -6,6 +6,7 @@ import { useProjectsStore } from '../../stores/projects'
 import { useTeamStore } from '../../stores/team'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
+import * as timeRecordsService from '../../services/timeRecords.service'
 import type { TimeRecord } from '../../types/timeRecord'
 import { formatTimeOfDay } from '../../utils/datetime'
 import CurrencyDisplay from '../../components/ui/CurrencyDisplay.vue'
@@ -22,15 +23,33 @@ const projects = useProjectsStore()
 const team = useTeamStore()
 const ui = useUiStore()
 
+// Approved-but-not-invoiced records are fetched separately from the shared
+// store (which only holds one filtered set at a time) so this page can show
+// both the pending queue and the "revert to pending" list side by side.
+const approvedNotInvoiced = ref<TimeRecord[]>([])
+async function loadApprovedNotInvoiced(): Promise<void> {
+  approvedNotInvoiced.value = await timeRecordsService.listTimeRecords(teamId, {
+    status: 'approved',
+    invoiced: false,
+  })
+}
+
 const { loading, run: load } = useAsyncAction(async () => {
   await Promise.all([
     timeRecords.fetchAll(teamId, { status: 'pending' }),
+    loadApprovedNotInvoiced(),
     projects.loaded ? Promise.resolve() : projects.fetchAll(teamId),
   ])
 })
 onMounted(load)
 
 const pending = computed(() => timeRecords.items.filter((r) => r.status === 'pending'))
+
+const { run: unapprove } = useAsyncAction(async (record: TimeRecord) => {
+  await timeRecords.unapprove(teamId, record._id)
+  approvedNotInvoiced.value = approvedNotInvoiced.value.filter((r) => r._id !== record._id)
+  ui.success('Reverted to pending.')
+})
 
 function projectName(projectId: string): string {
   return projects.items.find((p) => p._id === projectId)?.name ?? 'Unknown project'
@@ -86,6 +105,39 @@ const { loading: rejectSubmitting, run: confirmReject } = useAsyncAction(async (
         </div>
       </li>
     </ul>
+
+    <template v-if="!loading && approvedNotInvoiced.length > 0">
+      <h2 class="mb-2 mt-8 text-sm font-semibold text-surface-800">Approved, not yet invoiced</h2>
+      <p class="mb-3 text-xs text-surface-500">
+        Already approved — revert to pending if it needs a correction. Once it's part of a personal invoice, it can
+        no longer be reverted here.
+      </p>
+      <ul class="space-y-2">
+        <li
+          v-for="record in approvedNotInvoiced"
+          :key="record._id"
+          class="rounded-lg border border-surface-200 bg-white px-4 py-3"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-medium text-surface-900">{{ memberName(record.userId) }} · {{ projectName(record.projectId) }}</div>
+              <div class="text-xs text-surface-500">
+                {{ record.date.slice(0, 10) }} · {{ formatTimeOfDay(record.startTime) }}–{{ formatTimeOfDay(record.endTime) }} ·
+                {{ (record.durationMinutes / 60).toFixed(2) }}h
+                <span v-if="!record.billable">· non-billable</span>
+              </div>
+            </div>
+            <div class="shrink-0 text-right text-xs text-surface-500">
+              <div><CurrencyDisplay :amount="record.calculatedCost" :currency="record.currency" /></div>
+              <RateField :amount="record.resolvedRate" :currency="record.currency" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <AppButton variant="secondary" @click="unapprove(record)">Revert to pending</AppButton>
+          </div>
+        </li>
+      </ul>
+    </template>
 
     <Modal v-if="rejecting" title="Reject time record" @close="rejecting = null">
       <form id="reject-form" @submit.prevent="confirmReject">

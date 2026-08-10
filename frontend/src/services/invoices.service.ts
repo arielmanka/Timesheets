@@ -79,6 +79,11 @@ export async function sendInvoice(teamId: string, invoiceId: string): Promise<In
   return data.invoice
 }
 
+export async function revertInvoiceToDraft(teamId: string, invoiceId: string): Promise<Invoice> {
+  const { data } = await api.post<{ invoice: Invoice }>(`/teams/${teamId}/invoices/${invoiceId}/revert-to-draft`)
+  return data.invoice
+}
+
 export async function recordInvoicePayment(
   teamId: string,
   invoiceId: string,
@@ -92,12 +97,12 @@ export async function recordInvoicePayment(
   return data.invoice
 }
 
-export async function downloadInvoicePdf(teamId: string, invoiceId: string, invoiceNumber: number): Promise<void> {
+export async function downloadInvoicePdf(teamId: string, invoiceId: string, invoiceNumber: string): Promise<void> {
   const { data } = await api.get(`/teams/${teamId}/invoices/${invoiceId}/pdf`, { responseType: 'blob' })
   downloadBlob(data, `invoice-${invoiceNumber}.pdf`)
 }
 
-export async function downloadInvoiceCsv(teamId: string, invoiceId: string, invoiceNumber: number): Promise<void> {
+export async function downloadInvoiceCsv(teamId: string, invoiceId: string, invoiceNumber: string): Promise<void> {
   const { data } = await api.get(`/teams/${teamId}/invoices/${invoiceId}/csv`, { responseType: 'blob' })
   downloadBlob(data, `invoice-${invoiceNumber}.csv`)
 }

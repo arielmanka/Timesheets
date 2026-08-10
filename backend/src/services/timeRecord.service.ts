@@ -1,6 +1,7 @@
 import { TimeRecord, type ITimeRecord, type TimeRecordStatus } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
 import { resolveRate } from './rateResolver.service.js';
+import { getTeamsForUser } from './team.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
 
@@ -48,6 +49,21 @@ export async function createTimeRecord(
   }
   if (project.teamId.toString() !== teamId) {
     throw AppError.forbidden('Project does not belong to this team');
+  }
+
+  // Entry date must fall within the project's active date range, if set (CPT-8).
+  const entryDate = new Date(data.date);
+  if (project.startDate && entryDate.getTime() < project.startDate.getTime()) {
+    throw AppError.badRequest(
+      `Can only log time on or after this project's start date (${project.startDate.toISOString().slice(0, 10)})`,
+      'OUTSIDE_PROJECT_DATES'
+    );
+  }
+  if (project.endDate && entryDate.getTime() > project.endDate.getTime()) {
+    throw AppError.badRequest(
+      `Can only log time on or before this project's end date (${project.endDate.toISOString().slice(0, 10)})`,
+      'OUTSIDE_PROJECT_DATES'
+    );
   }
 
   // Calculate duration (TR-7)
@@ -243,6 +259,7 @@ export async function deleteTimeRecord(recordId: string, userId: string): Promis
 export interface ListTimeRecordsFilter {
   userId?: string;
   projectId?: string;
+  taskId?: string;
   clientId?: string;
   startDate?: Date;
   endDate?: Date;
@@ -267,6 +284,7 @@ export async function listTimeRecords(
   }
 
   if (filter.projectId) query.projectId = filter.projectId;
+  if (filter.taskId) query.taskId = filter.taskId;
   if (filter.status) query.status = filter.status;
   if (filter.billable !== undefined) query.billable = filter.billable;
   if (filter.invoiced !== undefined) query.invoiced = filter.invoiced;
@@ -288,6 +306,55 @@ export async function listTimeRecords(
     : { $in: projectIds };
 
   return TimeRecord.find(query).sort({ date: -1, startTime: -1 });
+}
+
+// ---------------------------------------------------------------------------
+// List across every team the user belongs to — lets a user see their own
+// time everywhere at once (e.g. to understand why a same-day overlap block
+// fired, when the conflicting entry lives in a different team than the one
+// they're currently viewing). Always scoped to the requesting user's own
+// records; never exposes anyone else's time.
+// ---------------------------------------------------------------------------
+export interface CrossTeamTimeRecord {
+  record: ITimeRecord;
+  teamId: string;
+  teamName: string;
+  projectName: string;
+}
+
+export async function listMyTimeRecordsAcrossTeams(
+  userId: string,
+  filter: { startDate?: Date; endDate?: Date; billable?: boolean; status?: TimeRecordStatus }
+): Promise<CrossTeamTimeRecord[]> {
+  const teams = await getTeamsForUser(userId);
+  const teamIds = teams.map((t) => t._id);
+  const projects = await Project.find({ teamId: { $in: teamIds } });
+  const projectIds = projects.map((p) => p._id);
+
+  const query: Record<string, unknown> = { userId, projectId: { $in: projectIds } };
+  if (filter.startDate || filter.endDate) {
+    query.date = {};
+    if (filter.startDate) (query.date as Record<string, Date>).$gte = filter.startDate;
+    if (filter.endDate) (query.date as Record<string, Date>).$lte = filter.endDate;
+  }
+  if (filter.billable !== undefined) query.billable = filter.billable;
+  if (filter.status) query.status = filter.status;
+
+  const records = await TimeRecord.find(query).sort({ date: -1, startTime: -1 });
+
+  const teamNameById = new Map(teams.map((t) => [t._id.toString(), t.name]));
+  const projectById = new Map(projects.map((p) => [p._id.toString(), p]));
+
+  return records.map((record) => {
+    const project = projectById.get(record.projectId.toString());
+    const teamId = project?.teamId.toString() ?? '';
+    return {
+      record,
+      teamId,
+      teamName: teamNameById.get(teamId) ?? 'Unknown team',
+      projectName: project?.name ?? 'Unknown project',
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +385,45 @@ export async function approveTimeRecord(
   await record.save();
 
   logger.info({ recordId, managerId }, 'Time record approved');
+  return record;
+}
+
+// ---------------------------------------------------------------------------
+// Revert an approved record back to pending — lets a manager undo an
+// approval mistake, but only while the record hasn't been pulled onto a
+// personal invoice yet; once invoiced, the invoice's own line items are the
+// source of truth and unwinding the approval underneath it would leave them
+// inconsistent.
+// ---------------------------------------------------------------------------
+export async function unapproveTimeRecord(
+  recordId: string,
+  managerId: string
+): Promise<ITimeRecord> {
+  const record = await TimeRecord.findById(recordId);
+  if (!record) {
+    throw AppError.notFound('Time record not found');
+  }
+
+  if (record.status !== 'approved') {
+    throw AppError.badRequest(
+      `Cannot revert a record with status '${record.status}' — it must be approved`,
+      'INVALID_STATUS'
+    );
+  }
+
+  if (record.invoiced) {
+    throw AppError.badRequest(
+      'This time record is part of a personal invoice and cannot be reverted',
+      'RECORD_INVOICED'
+    );
+  }
+
+  record.status = 'pending';
+  record.locked = false;
+  record.approvedBy = null;
+  await record.save();
+
+  logger.info({ recordId, managerId }, 'Time record reverted to pending');
   return record;
 }
 

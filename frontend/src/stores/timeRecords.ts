@@ -41,6 +41,12 @@ export const useTimeRecordsStore = defineStore('timeRecords', () => {
     return record
   }
 
+  async function unapprove(teamId: string, recordId: string): Promise<TimeRecord> {
+    const record = await timeRecordsService.unapproveTimeRecord(teamId, recordId)
+    replace(record)
+    return record
+  }
+
   function replace(record: TimeRecord): void {
     const index = items.value.findIndex((r) => r._id === record._id)
     if (index !== -1) items.value[index] = record
@@ -52,5 +58,5 @@ export const useTimeRecordsStore = defineStore('timeRecords', () => {
     loaded.value = false
   }
 
-  return { items, loaded, fetchAll, create, update, remove, approve, reject, reset }
+  return { items, loaded, fetchAll, create, update, remove, approve, reject, unapprove, reset }
 })

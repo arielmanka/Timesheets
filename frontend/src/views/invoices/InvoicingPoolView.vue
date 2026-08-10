@@ -5,6 +5,7 @@ import { useProjectsStore } from '../../stores/projects'
 import { useClientsStore } from '../../stores/clients'
 import { useInvoicesStore } from '../../stores/invoices'
 import { useTeamStore } from '../../stores/team'
+import { useAuthStore } from '../../stores/auth'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
 import * as invoicesService from '../../services/invoices.service'
@@ -23,7 +24,15 @@ const projects = useProjectsStore()
 const clients = useClientsStore()
 const invoices = useInvoicesStore()
 const team = useTeamStore()
+const auth = useAuthStore()
 const ui = useUiStore()
+
+// A collective invoice is issued under the creating manager's own
+// incorporated business — see Account settings. No profile, no collective
+// invoice; this mirrors a hard block enforced server-side too.
+const hasIncorporationProfile = computed(
+  () => auth.user?.employmentType === 'contractor' && !!auth.user?.incorporation
+)
 
 const { loading, run: load } = useAsyncAction(async () => {
   await Promise.all([
@@ -69,6 +78,17 @@ function openCreate(): void {
   manualItems.value = []
   showCreate.value = true
 }
+
+// No tax rate of its own — the collective invoice is just the sum of each
+// selected personal invoice's own gross total (each keeps its own VAT rate).
+const grossPreview = computed(() => {
+  const poolTotal = pool.value
+    .filter((i) => selectedPoolIds.value.has(i._id))
+    .reduce((sum, i) => sum + i.total, 0)
+  const manualTotal = manualItems.value.reduce((sum, m) => sum + (m.amount || 0), 0)
+  return Math.round((poolTotal + manualTotal) * 100) / 100
+})
+const previewCurrency = computed(() => pool.value[0]?.currency ?? '')
 
 // A collective invoice is built exclusively from sent personal invoices —
 // never directly from time records. Every team member is expected to create
@@ -120,11 +140,16 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
   <div class="max-w-2xl">
     <div class="mb-1 flex items-center justify-between">
       <h1 class="text-lg font-semibold text-surface-900">Invoicing pool</h1>
-      <AppButton @click="openCreate">New collective invoice</AppButton>
+      <AppButton :disabled="!hasIncorporationProfile" @click="openCreate">New collective invoice</AppButton>
     </div>
     <p class="mb-5 text-sm text-surface-500">
       Roll up sent personal invoices from the team into one collective invoice for a client — spanning every
       project that client has. Time only enters a pool once its owner has sent their own personal invoice for it.
+    </p>
+    <p v-if="!hasIncorporationProfile" class="mb-5 rounded-md border border-warning-600/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+      A collective invoice is issued under your own incorporated business. Complete your
+      <router-link :to="{ name: 'account' }" class="underline">employment & billing profile</router-link>
+      as a contractor before creating one.
     </p>
 
     <p v-if="loading" class="text-sm text-surface-500">Loading…</p>
@@ -186,8 +211,9 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
                 @change="togglePool(inv._id)"
               />
               <span class="text-surface-700">
-                #{{ inv.invoiceNumber }} · {{ memberName(inv.createdBy) }} ·
+                {{ inv.invoiceNumber }} · {{ memberName(inv.createdBy) }} ·
                 {{ inv.projectId ? projectName(inv.projectId) : '' }} ·
+                VAT {{ inv.taxes[0]?.rate ?? 0 }}% ·
                 <CurrencyDisplay :amount="inv.total" :currency="inv.currency" />
               </span>
             </li>
@@ -209,6 +235,17 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
             <AppButton variant="secondary" @click="addManualItem">Add item</AppButton>
           </div>
         </fieldset>
+
+        <div class="rounded-md bg-surface-50 p-3 text-sm">
+          <p class="mb-1 text-xs text-surface-500">
+            No tax rate of its own — this total is the sum of each selected personal invoice's own gross amount,
+            each at the VAT rate its owner charged.
+          </p>
+          <div class="flex justify-between border-t border-surface-200 pt-1 font-semibold text-surface-900">
+            <span>Total</span>
+            <span class="tabular-nums">{{ previewCurrency }} {{ grossPreview.toFixed(2) }}</span>
+          </div>
+        </div>
       </div>
 
       <template #footer>

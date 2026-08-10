@@ -1,16 +1,10 @@
 import mongoose, { Schema, type Document, type Model, type Types } from 'mongoose';
+import { addressSchema, type IAddress } from './shared/address.js';
 
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
-export interface IBillingAddress {
-  line1: string;
-  line2: string | null;
-  city: string;
-  state: string;
-  postalCode: string;
-  country: string;
-}
+export type IBillingAddress = IAddress;
 
 export interface IClient extends Document {
   teamId: Types.ObjectId;
@@ -26,18 +20,6 @@ export interface IClient extends Document {
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
-const billingAddressSchema = new Schema<IBillingAddress>(
-  {
-    line1: { type: String, required: true, trim: true },
-    line2: { type: String, default: null, trim: true },
-    city: { type: String, required: true, trim: true },
-    state: { type: String, required: true, trim: true },
-    postalCode: { type: String, required: true, trim: true },
-    country: { type: String, required: true, trim: true },
-  },
-  { _id: false }
-);
-
 const clientSchema = new Schema<IClient>(
   {
     teamId: {
@@ -64,7 +46,7 @@ const clientSchema = new Schema<IClient>(
       lowercase: true,
     },
     billingAddress: {
-      type: billingAddressSchema,
+      type: addressSchema,
       required: true,
     },
     taxId: {

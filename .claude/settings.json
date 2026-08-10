@@ -49,7 +49,29 @@
       "Bash(grep -v \"X-Forwarded-For\\\\|xForwardedForHeader\\\\|express-rate-limit\\\\|ERR_ERL_UNEXPECTED\\\\|at process.processTicksAndRejections\\\\|help:\\\\|code: 'ERR\\\\|ValidationError\\\\|^}$\\\\|^\\\\s*at \")",
       "Bash(curl -sk -X POST https://localhost/api/v1/auth/register -H \"Content-Type: application/json\" -d '{\"email\":\"curltest1@example.com\",\"password\":\"password123\",\"firstName\":\"Curl\",\"lastName\":\"Test\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
       "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/recheck-empty-state.mjs\")",
-      "Bash(grep -v \"X-Forwarded-For\\\\|xForwardedForHeader\\\\|express-rate-limit\\\\|ERR_ERL_UNEXPECTED\\\\|at process.processTicksAndRejections\\\\|help:\\\\|code: 'ERR\\\\|ValidationError\\\\|^}$\")"
+      "Bash(grep -v \"X-Forwarded-For\\\\|xForwardedForHeader\\\\|express-rate-limit\\\\|ERR_ERL_UNEXPECTED\\\\|at process.processTicksAndRejections\\\\|help:\\\\|code: 'ERR\\\\|ValidationError\\\\|^}$\")",
+      "Bash(mkdir -p \"c:/Users/ariel/OneDrive/Projects/Timesheets/backend/src/models/shared\")",
+      "Bash(npm ls *)",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-tax-contractor.mjs\")",
+      "Bash(ls \"/c/Windows/Fonts/\" 2>/dev/null | grep -i \"^arial\\\\|^calibri\\\\|^dejavu\\\\|^noto\" | head -30)",
+      "Read(//c/Windows/Fonts//**)",
+      "Bash(docker run *)",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-pdf-polish.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-report-pdf.mjs\")",
+      "Bash(docker cp *)",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-collective-vat.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-edit-modal.mjs\" \"tib-ariel-lezsvg@example.com\" \"6a79ef56a7de618e28bd9236\" \"6a79ef56a7de618e28bd9274\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-cross-team-time.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-project-date-range.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-time-filters.mjs\")",
+      "Bash(curl -sk -X POST https://localhost/api/v1/auth/register -H \"Content-Type: application/json\" -d '{\"email\":\"curltest2@example.com\",\"password\":\"password123\",\"firstName\":\"Curl\",\"lastName\":\"Test\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-jump-date-only.mjs\")",
+      "Bash(timeout 40 node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-jump-date-only.mjs\")",
+      "Bash(timeout 30 node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-jump-date-only.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-revert-features.mjs\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\ariel\\OneDrive\\Projects\\Timesheets\\backend\\src\\models"
     ]
   }
 }

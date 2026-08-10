@@ -1,9 +1,25 @@
 import { api } from './api'
-import type { TimeRecord, TimeRecordInput, TimeRecordUpdateInput, ListTimeRecordsFilter } from '../types/timeRecord'
+import type {
+  TimeRecord,
+  TimeRecordInput,
+  TimeRecordUpdateInput,
+  ListTimeRecordsFilter,
+  CrossTeamTimeRecord,
+} from '../types/timeRecord'
 
 export async function listTimeRecords(teamId: string, filter: ListTimeRecordsFilter = {}): Promise<TimeRecord[]> {
   const { data } = await api.get<{ records: TimeRecord[] }>(`/teams/${teamId}/time-records`, { params: filter })
   return data.records
+}
+
+export async function listMyTimeRecordsAcrossTeams(filter: {
+  startDate?: string
+  endDate?: string
+  billable?: boolean
+  status?: TimeRecord['status']
+}): Promise<CrossTeamTimeRecord[]> {
+  const { data } = await api.get<{ entries: CrossTeamTimeRecord[] }>('/users/me/time-records', { params: filter })
+  return data.entries
 }
 
 export async function createTimeRecord(teamId: string, input: TimeRecordInput): Promise<TimeRecord> {
@@ -33,5 +49,10 @@ export async function rejectTimeRecord(teamId: string, recordId: string, reason:
   const { data } = await api.post<{ record: TimeRecord }>(`/teams/${teamId}/time-records/${recordId}/reject`, {
     reason,
   })
+  return data.record
+}
+
+export async function unapproveTimeRecord(teamId: string, recordId: string): Promise<TimeRecord> {
+  const { data } = await api.post<{ record: TimeRecord }>(`/teams/${teamId}/time-records/${recordId}/unapprove`)
   return data.record
 }

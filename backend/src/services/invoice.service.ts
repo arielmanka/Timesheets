@@ -3,6 +3,7 @@ import { InvoiceCounter } from '../models/InvoiceCounter.js';
 import { TimeRecord, type ITimeRecord } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
 import { Client } from '../models/Client.js';
+import { User } from '../models/User.js';
 import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
@@ -10,11 +11,17 @@ import { AppError } from '../utils/errors.js';
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+export interface TaxRuleInput {
+  name: string;
+  rate: number;
+}
+
 export interface CreatePersonalInvoiceData {
   projectId: string;
   timeRecordIds: string[];
   notes?: string | null;
   manualItems?: Array<{ description: string; amount: number }>;
+  taxRules?: TaxRuleInput[];
 }
 
 export interface CreateCollectiveInvoiceData {
@@ -28,6 +35,7 @@ export interface CreateCollectiveInvoiceData {
 export interface UpdateDraftData {
   notes?: string | null;
   manualItems?: Array<{ description: string; amount: number }>;
+  taxRules?: TaxRuleInput[];
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +49,16 @@ async function getNextInvoiceNumber(teamId: string): Promise<number> {
     { new: true, upsert: true }
   );
   return counter.lastNumber;
+}
+
+// Format: yyyymmdd-NNNNNN — creation date + a 6-digit, zero-padded, per-team
+// sequence number that never resets (the date is just a stamp of when the
+// invoice was issued, not a daily-reset scope).
+function formatInvoiceNumber(seq: number, date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${d}-${String(seq).padStart(6, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,9 +81,11 @@ function applyTaxRules(
 // ---------------------------------------------------------------------------
 // Recompute subtotal/taxes/total from an invoice's current line + manual
 // items. Shared by every create/add/remove path so the math never drifts
-// between them. Collective invoices don't take a taxRules argument — tax
-// calculation for multi-project client invoices is deferred to a later
-// phase, since a single project's tax rules no longer unambiguously apply.
+// between them. Tax is always explicitly chosen by the invoice's creator at
+// creation/edit time — never derived from project or client config — so
+// every caller either passes the rules the user picked, or (when an edit
+// only touches line items, not tax) the invoice's own already-stored
+// taxes, so the previously chosen rate keeps applying to the new subtotal.
 // ---------------------------------------------------------------------------
 function recalcTotals(invoice: IInvoice, taxRules: Array<{ name: string; rate: number }> = []): void {
   const lineSubtotal = invoice.lineItems.reduce((sum, item) => sum + item.amount, 0);
@@ -84,20 +104,60 @@ function timeRecordLineItem(record: ITimeRecord): ILineItem {
     hours: Math.round((record.durationMinutes / 60) * 100) / 100,
     rate: record.resolvedRate,
     amount: record.calculatedCost,
+    netAmount: null,
+    taxRate: null,
     timeRecordId: record._id,
     personalInvoiceId: null,
   } as ILineItem;
 }
 
+// A collective invoice keeps each pooled personal invoice's own VAT rate —
+// it does not apply a rate of its own. Ariel (0% VAT, Poland) and Bob (21%
+// VAT, Germany) each charge what their own incorporation requires; the
+// collective invoice for their shared client just totals up what each of
+// them already billed, gross, one line per personal invoice.
 function personalInvoiceLineItem(personal: IInvoice): ILineItem {
   return {
-    description: `Personal Invoice #${personal.invoiceNumber}`,
+    description: personal.invoiceNumber,
     hours: personal.lineItems.reduce((sum, li) => sum + li.hours, 0),
     rate: 0,
     amount: personal.total,
+    netAmount: personal.subtotal,
+    taxRate: personal.taxes[0]?.rate ?? 0,
     timeRecordId: null,
     personalInvoiceId: personal._id,
   } as ILineItem;
+}
+
+// ---------------------------------------------------------------------------
+// Recompute a collective invoice's totals from its rolled-up line items.
+// Unlike recalcTotals, no tax rule is applied here — each line item already
+// carries its own net/gross (from the personal invoice it represents), so
+// the collective invoice's subtotal/total are just the sum of those, and it
+// has no tax rate of its own.
+// ---------------------------------------------------------------------------
+function recalcCollectiveTotals(invoice: IInvoice): void {
+  const lineNet = invoice.lineItems.reduce((sum, item) => sum + (item.netAmount ?? item.amount), 0);
+  const lineGross = invoice.lineItems.reduce((sum, item) => sum + item.amount, 0);
+  const manualTotal = invoice.manualItems.reduce((sum, item) => sum + item.amount, 0);
+
+  invoice.subtotal = Math.round((lineNet + manualTotal) * 100) / 100;
+  invoice.total = Math.round((lineGross + manualTotal) * 100) / 100;
+  invoice.totalTax = Math.round((invoice.total - invoice.subtotal) * 100) / 100;
+  invoice.taxes = [] as unknown as IInvoice['taxes'];
+}
+
+// ---------------------------------------------------------------------------
+// A contractor's incorporation profile, required to issue tax invoices.
+// ---------------------------------------------------------------------------
+async function requireIncorporationProfile(userId: string): Promise<void> {
+  const user = await User.findById(userId);
+  if (!user || user.employmentType !== 'contractor' || !user.incorporation) {
+    throw AppError.badRequest(
+      'A complete incorporation profile (company name, address, tax ID) is required to create a collective invoice. Add it in Account settings first.',
+      'INCORPORATION_PROFILE_REQUIRED'
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +189,7 @@ export async function createPersonalInvoice(
     );
   }
 
-  const invoiceNumber = await getNextInvoiceNumber(teamId);
+  const invoiceNumber = formatInvoiceNumber(await getNextInvoiceNumber(teamId), new Date());
   const lineItems = records.map(timeRecordLineItem);
   const manualSubtotal = (data.manualItems ?? []).reduce((sum, item) => sum + item.amount, 0);
 
@@ -152,7 +212,7 @@ export async function createPersonalInvoice(
 
   const lineSubtotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
   invoice.subtotal = Math.round((lineSubtotal + manualSubtotal) * 100) / 100;
-  const { taxes, totalTax } = applyTaxRules(invoice.subtotal, project.taxRules);
+  const { taxes, totalTax } = applyTaxRules(invoice.subtotal, data.taxRules ?? []);
   invoice.taxes = taxes as unknown as IInvoice['taxes'];
   invoice.totalTax = totalTax;
   invoice.total = Math.round((invoice.subtotal + totalTax) * 100) / 100;
@@ -220,8 +280,7 @@ export async function addTimeRecordToDraft(
   invoice.lineItems.push(timeRecordLineItem(record));
   invoice.timeRecordIds.push(record._id);
 
-  const project = await Project.findById(invoice.projectId);
-  recalcTotals(invoice, project?.taxRules ?? []);
+  recalcTotals(invoice, invoice.taxes.map((t) => ({ name: t.name, rate: t.rate })));
   await invoice.save();
 
   record.invoiced = true;
@@ -261,8 +320,7 @@ export async function removeTimeRecordFromDraft(
     );
   }
 
-  const project = await Project.findById(invoice.projectId);
-  recalcTotals(invoice, project?.taxRules ?? []);
+  recalcTotals(invoice, invoice.taxes.map((t) => ({ name: t.name, rate: t.rate })));
   await invoice.save();
 
   await TimeRecord.updateOne(
@@ -286,6 +344,8 @@ export async function createCollectiveInvoice(
   teamId: string,
   data: CreateCollectiveInvoiceData
 ): Promise<IInvoice> {
+  await requireIncorporationProfile(managerId);
+
   const client = await Client.findOne({ _id: data.clientId, teamId });
   if (!client) {
     throw AppError.notFound('Client not found in this team');
@@ -327,7 +387,7 @@ export async function createCollectiveInvoice(
   }
   const currency = [...currencies][0] as string;
 
-  const invoiceNumber = await getNextInvoiceNumber(teamId);
+  const invoiceNumber = formatInvoiceNumber(await getNextInvoiceNumber(teamId), new Date());
 
   const lineItems: ILineItem[] = personalInvoices.map(personalInvoiceLineItem);
   const allTimeRecordIds = personalInvoices.flatMap((pi) => pi.timeRecordIds);
@@ -350,8 +410,7 @@ export async function createCollectiveInvoice(
     reconciled: false,
   });
 
-  // No taxRules argument — see recalcTotals' doc comment.
-  recalcTotals(invoice);
+  recalcCollectiveTotals(invoice);
   await invoice.save();
 
   await Invoice.updateMany(
@@ -416,7 +475,7 @@ export async function addPersonalInvoiceToPool(
   collective.lineItems.push(personalInvoiceLineItem(personal));
   collective.personalInvoiceIds.push(personal._id);
   collective.timeRecordIds.push(...personal.timeRecordIds);
-  recalcTotals(collective);
+  recalcCollectiveTotals(collective);
   await collective.save();
 
   personal.includedInCollectiveInvoiceId = collective._id;
@@ -464,7 +523,7 @@ export async function removePersonalInvoiceFromPool(
     );
   }
 
-  recalcTotals(collective);
+  recalcCollectiveTotals(collective);
   await collective.save();
 
   if (personal) {
@@ -496,12 +555,17 @@ export async function updateDraft(
   if (data.notes !== undefined) invoice.notes = data.notes;
   if (data.manualItems !== undefined) {
     invoice.manualItems = data.manualItems as unknown as IInvoice['manualItems'];
-
-    const taxRules =
-      invoice.type === 'personal'
-        ? (await Project.findById(invoice.projectId))?.taxRules ?? []
-        : [];
-    recalcTotals(invoice, taxRules);
+  }
+  if (invoice.type === 'personal') {
+    if (data.manualItems !== undefined || data.taxRules !== undefined) {
+      const taxRules = data.taxRules ?? invoice.taxes.map((t) => ({ name: t.name, rate: t.rate }));
+      recalcTotals(invoice, taxRules);
+    }
+  } else if (data.manualItems !== undefined) {
+    // A collective invoice has no tax rate of its own — taxRules on the
+    // request is ignored here; each line item already carries the rate its
+    // owner charged.
+    recalcCollectiveTotals(invoice);
   }
 
   await invoice.save();
@@ -578,6 +642,50 @@ export async function sendInvoice(
   await invoice.save();
 
   logger.info({ invoiceId }, 'Invoice sent');
+  return invoice;
+}
+
+// ---------------------------------------------------------------------------
+// Revert a sent personal invoice back to draft — lets its owner (or a
+// manager, mirroring who can send it) fix a mistake without deleting and
+// re-creating the whole thing. Blocked once it's been pulled into a
+// collective invoice's pool, since that invoice is now relying on this
+// one's sent, immutable state.
+// ---------------------------------------------------------------------------
+export async function revertPersonalInvoiceToDraft(
+  invoiceId: string,
+  teamId: string,
+  actorId: string,
+  isManager: boolean
+): Promise<IInvoice> {
+  const invoice = await Invoice.findOne({ _id: invoiceId, teamId });
+  if (!invoice) {
+    throw AppError.notFound('Invoice not found');
+  }
+
+  if (invoice.type !== 'personal') {
+    throw AppError.badRequest('Only a personal invoice can be reverted to draft this way', 'NOT_PERSONAL');
+  }
+
+  if (invoice.status !== 'sent') {
+    throw AppError.badRequest(`Only a sent invoice can be reverted to draft (current status: '${invoice.status}')`, 'NOT_SENT');
+  }
+
+  if (invoice.createdBy.toString() !== actorId && !isManager) {
+    throw AppError.forbidden('You can only revert your own personal invoice');
+  }
+
+  if (invoice.includedInCollectiveInvoiceId) {
+    throw AppError.badRequest(
+      'This invoice is part of a collective invoice and cannot be reverted to draft',
+      'IN_COLLECTIVE_POOL'
+    );
+  }
+
+  invoice.status = 'draft';
+  await invoice.save();
+
+  logger.info({ invoiceId }, 'Personal invoice reverted to draft');
   return invoice;
 }
 

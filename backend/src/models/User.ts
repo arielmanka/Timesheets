@@ -1,6 +1,7 @@
 import mongoose, { Schema, type Document, type Model } from 'mongoose';
 import argon2 from 'argon2';
 import crypto from 'crypto';
+import { addressSchema, type IAddress } from './shared/address.js';
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -11,6 +12,17 @@ export interface IRefreshToken {
   createdAt: Date;
 }
 
+export type EmploymentType = 'employee' | 'contractor';
+
+// A contractor's own incorporated business — printed as the "from" block on
+// personal invoices they issue, and (via the creating manager) on collective
+// invoices too. Only meaningful when employmentType is 'contractor'.
+export interface IIncorporationDetails {
+  companyName: string;
+  address: IAddress;
+  taxId: string;
+}
+
 export interface IUser extends Document {
   uid: string;
   email: string;
@@ -19,6 +31,8 @@ export interface IUser extends Document {
   firstName: string;
   lastName: string;
   locale: string;
+  employmentType: EmploymentType;
+  incorporation: IIncorporationDetails | null;
   refreshTokens: IRefreshToken[];
   emailVerificationToken: string | null;
   emailVerificationExpiry: Date | null;
@@ -41,6 +55,15 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
     token: { type: String, required: true },
     expiresAt: { type: Date, required: true },
     createdAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
+const incorporationSchema = new Schema<IIncorporationDetails>(
+  {
+    companyName: { type: String, required: true, trim: true },
+    address: { type: addressSchema, required: true },
+    taxId: { type: String, required: true, trim: true },
   },
   { _id: false }
 );
@@ -85,6 +108,15 @@ const userSchema = new Schema<IUser>(
     locale: {
       type: String,
       default: 'en-US',
+    },
+    employmentType: {
+      type: String,
+      enum: ['employee', 'contractor'],
+      default: 'employee',
+    },
+    incorporation: {
+      type: incorporationSchema,
+      default: null,
     },
     refreshTokens: {
       type: [refreshTokenSchema],
