@@ -228,4 +228,4 @@ Backend unit tests use Vitest. There's no automated frontend or end-to-end test 
 
 ## License
 
-No license file is currently included in this repository. Add one (e.g. `LICENSE`) before distributing this code publicly.
+MIT — see [LICENSE](LICENSE). Free to use, copy, modify, and distribute.
