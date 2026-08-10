@@ -67,7 +67,16 @@ export interface IInvoice extends Document {
   currency: string;
   partialPaymentAmount: number | null;
   paymentDate: Date | null;
+  // For a collective invoice, the client-billed period as chosen at
+  // creation; for a personal invoice, auto-derived from the min/max date of
+  // its included time records (the actual service/supply period) — never
+  // manually edited, so it always matches what's actually being billed.
   period: { startDate: Date; endDate: Date } | null;
+  dueDate: Date | null;
+  paymentTerms: string | null;
+  // Free-text legal mention — e.g. "Reverse charge — VAT to be accounted
+  // for by the recipient" — for exempt or reverse-charge EU transactions.
+  taxNote: string | null;
   reconciled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -206,6 +215,22 @@ const invoiceSchema = new Schema<IInvoice>(
     period: {
       type: periodSchema,
       default: null,
+    },
+    dueDate: {
+      type: Date,
+      default: null,
+    },
+    paymentTerms: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 200,
+    },
+    taxNote: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 500,
     },
     reconciled: {
       type: Boolean,

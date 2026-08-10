@@ -139,6 +139,9 @@ const editNotes = ref('')
 const editManualItems = ref<ManualItemInput[]>([])
 const editTaxName = ref('')
 const editTaxRate = ref<number | null>(null)
+const editDueDate = ref('')
+const editPaymentTerms = ref('')
+const editTaxNote = ref('')
 function openEdit(): void {
   if (!invoice.value) return
   editNotes.value = invoice.value.notes ?? ''
@@ -146,6 +149,9 @@ function openEdit(): void {
   const currentTax = invoice.value.taxes[0]
   editTaxName.value = currentTax?.name ?? ''
   editTaxRate.value = currentTax?.rate ?? null
+  editDueDate.value = invoice.value.dueDate?.slice(0, 10) ?? ''
+  editPaymentTerms.value = invoice.value.paymentTerms ?? ''
+  editTaxNote.value = invoice.value.taxNote ?? ''
   showEdit.value = true
 }
 function addManualItem(): void {
@@ -165,6 +171,9 @@ const { loading: saving, run: saveEdit } = useAsyncAction(async () => {
     ...(isPersonal
       ? { taxRules: editTaxName.value.trim() && editTaxRate.value ? [{ name: editTaxName.value.trim(), rate: editTaxRate.value }] : [] }
       : {}),
+    dueDate: editDueDate.value || null,
+    paymentTerms: editPaymentTerms.value || null,
+    taxNote: editTaxNote.value || null,
   })
   showEdit.value = false
   ui.success('Draft updated.')
@@ -248,7 +257,19 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
           {{ invoice.period.startDate.slice(0, 10) }} – {{ invoice.period.endDate.slice(0, 10) }}
         </div>
       </div>
+      <div v-if="invoice.dueDate">
+        <div class="text-xs uppercase tracking-wide text-surface-400">Due date</div>
+        <div class="mt-0.5 text-surface-800">{{ invoice.dueDate.slice(0, 10) }}</div>
+      </div>
+      <div v-if="invoice.paymentTerms">
+        <div class="text-xs uppercase tracking-wide text-surface-400">Payment terms</div>
+        <div class="mt-0.5 text-surface-800">{{ invoice.paymentTerms }}</div>
+      </div>
     </div>
+
+    <p v-if="invoice.taxNote" class="rounded-md border border-surface-200 bg-white px-3 py-2 text-sm text-surface-600">
+      {{ invoice.taxNote }}
+    </p>
 
     <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
       <table class="w-full text-sm">
@@ -419,6 +440,17 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
 
     <Modal v-if="showEdit" title="Edit draft" @close="showEdit = false">
       <form id="edit-invoice-form" class="space-y-4" @submit.prevent="saveEdit">
+        <div class="grid grid-cols-2 gap-3">
+          <FormField label="Due date">
+            <input v-model="editDueDate" type="date" class="field-control" />
+          </FormField>
+          <FormField label="Payment terms" hint="e.g. Net 30">
+            <input v-model="editPaymentTerms" class="field-control" placeholder="Optional" />
+          </FormField>
+        </div>
+        <FormField label="Tax note" hint="e.g. reverse charge or exemption reference for EU intra-community transactions.">
+          <textarea v-model="editTaxNote" rows="2" class="field-control" placeholder="Optional" />
+        </FormField>
         <FormField label="Notes">
           <textarea v-model="editNotes" rows="2" class="field-control" />
         </FormField>

@@ -8,6 +8,7 @@ import { User } from '../models/User.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
 import { AppError } from '../utils/errors.js';
+import type { IBankAccountDetails } from '../models/shared/bankAccount.js';
 
 // PDFKit's built-in Helvetica/Times/Courier fonts only support WinAnsi
 // encoding (~Latin-1) — Polish and other Latin-Extended-A characters (ą, ć,
@@ -36,6 +37,9 @@ const createPersonalSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   manualItems: z.array(manualItemSchema).optional(),
   taxRules: z.array(taxRuleSchema).optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  paymentTerms: z.string().max(200).nullable().optional(),
+  taxNote: z.string().max(500).nullable().optional(),
 });
 
 const createCollectiveSchema = z.object({
@@ -47,12 +51,18 @@ const createCollectiveSchema = z.object({
   personalInvoiceIds: z.array(z.string()).optional(),
   notes: z.string().max(5000).nullable().optional(),
   manualItems: z.array(manualItemSchema).optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  paymentTerms: z.string().max(200).nullable().optional(),
+  taxNote: z.string().max(500).nullable().optional(),
 });
 
 const updateDraftSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   manualItems: z.array(manualItemSchema).optional(),
   taxRules: z.array(taxRuleSchema).optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  paymentTerms: z.string().max(200).nullable().optional(),
+  taxNote: z.string().max(500).nullable().optional(),
 });
 
 const recordPaymentSchema = z.object({
@@ -285,7 +295,7 @@ export async function recordPayment(req: Request, res: Response, next: NextFunct
 // Shared: resolve the client + preparer details invoice documents themselves
 // don't carry, for the header block on exports.
 // ---------------------------------------------------------------------------
-async function resolveHeaderDetails(clientId: unknown, createdBy: unknown) {
+async function resolveHeaderDetails(clientId: unknown, createdBy: unknown, invoiceType: 'personal' | 'collective') {
   const [client, preparer] = await Promise.all([
     Client.findById(clientId),
     User.findById(createdBy),
@@ -301,7 +311,27 @@ async function resolveHeaderDetails(clientId: unknown, createdBy: unknown) {
     // an employee's invoice simply has no incorporation section.
     preparerIncorporation:
       preparer?.employmentType === 'contractor' && preparer.incorporation ? preparer.incorporation : null,
+    preparerPhone: preparer?.incorporation?.phone ?? null,
+    // A personal invoice is paid into the preparer's own account; a
+    // collective invoice — issued by a manager on the team's behalf — is
+    // paid into that manager's separate collective account.
+    preparerBankAccount:
+      (invoiceType === 'collective' ? preparer?.collectiveBankAccount : preparer?.personalBankAccount) ?? null,
   };
+}
+
+// Renders a bank account as printable lines — IBAN/SWIFT for EU accounts,
+// routing+account for North American ones, otherDetails as a free-text
+// fallback — whichever of those the account actually has set.
+function formatBankAccountLines(account: IBankAccountDetails | null): string[] {
+  if (!account) return [];
+  const lines = [`${account.accountHolderName} — ${account.bankName} (${account.country})`];
+  if (account.iban) lines.push(`IBAN: ${account.iban}`);
+  if (account.swiftBic) lines.push(`SWIFT/BIC: ${account.swiftBic}`);
+  if (account.routingNumber) lines.push(`Routing number: ${account.routingNumber}`);
+  if (account.accountNumber) lines.push(`Account number: ${account.accountNumber}`);
+  if (account.otherDetails) lines.push(account.otherDetails);
+  return lines;
 }
 
 // GET /teams/:teamId/invoices/:invoiceId/csv
@@ -312,10 +342,8 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       req.params.invoiceId as string,
       teamReq.team.teamId
     );
-    const { clientName, clientTaxId, preparerName, preparerIncorporation } = await resolveHeaderDetails(
-      invoice.clientId,
-      invoice.createdBy
-    );
+    const { clientName, clientTaxId, preparerName, preparerIncorporation, preparerPhone, preparerBankAccount } =
+      await resolveHeaderDetails(invoice.clientId, invoice.createdBy, invoice.type);
 
     const { stringify } = await import('csv-stringify/sync');
 
@@ -336,6 +364,7 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       ...(preparerIncorporation
         ? [metaRow(`From: ${preparerIncorporation.companyName}`), metaRow(`Tax ID: ${preparerIncorporation.taxId}`)]
         : []),
+      ...(preparerPhone ? [metaRow(`Phone: ${preparerPhone}`)] : []),
       ...(invoice.period
         ? [
             metaRow(
@@ -343,6 +372,10 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
             ),
           ]
         : []),
+      ...(invoice.dueDate ? [metaRow(`Due date: ${invoice.dueDate.toISOString().slice(0, 10)}`)] : []),
+      ...(invoice.paymentTerms ? [metaRow(`Payment terms: ${invoice.paymentTerms}`)] : []),
+      ...(invoice.taxNote ? [metaRow(invoice.taxNote)] : []),
+      ...(preparerBankAccount ? [metaRow('Payment details:'), ...formatBankAccountLines(preparerBankAccount).map(metaRow)] : []),
       blankRow,
     ];
     const rows = invoice.lineItems.map((item) =>
@@ -383,8 +416,17 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       req.params.invoiceId as string,
       teamReq.team.teamId
     );
-    const { clientName, clientAddress, clientContact, clientEmail, clientTaxId, preparerName, preparerIncorporation } =
-      await resolveHeaderDetails(invoice.clientId, invoice.createdBy);
+    const {
+      clientName,
+      clientAddress,
+      clientContact,
+      clientEmail,
+      clientTaxId,
+      preparerName,
+      preparerIncorporation,
+      preparerPhone,
+      preparerBankAccount,
+    } = await resolveHeaderDetails(invoice.clientId, invoice.createdBy, invoice.type);
 
     const PDFDocument = (await import('pdfkit')).default;
     const doc = new PDFDocument({ margin: 50 });
@@ -399,12 +441,25 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     // Header — right column: invoice metadata; left column: bill-to / prepared-by
     doc.fontSize(24).text('INVOICE', 300, 50, { width: 245, align: 'right' });
     doc.fontSize(10);
-    doc.text(`#${invoice.invoiceNumber}`, 300, 80, { width: 245, align: 'right' });
-    doc.text(`Date: ${invoice.createdAt.toISOString().slice(0, 10)}`, 300, 94, { width: 245, align: 'right' });
-    doc.text(`Status: ${invoice.status.toUpperCase()}`, 300, 108, { width: 245, align: 'right' });
+    let rightY = 80;
+    doc.text(`#${invoice.invoiceNumber}`, 300, rightY, { width: 245, align: 'right' });
+    rightY += 14;
+    doc.text(`Date: ${invoice.createdAt.toISOString().slice(0, 10)}`, 300, rightY, { width: 245, align: 'right' });
+    rightY += 14;
+    doc.text(`Status: ${invoice.status.toUpperCase()}`, 300, rightY, { width: 245, align: 'right' });
+    rightY += 14;
     if (invoice.period) {
       const periodText = `Period: ${invoice.period.startDate.toISOString().slice(0, 10)} – ${invoice.period.endDate.toISOString().slice(0, 10)}`;
-      doc.text(periodText, 300, 122, { width: 245, align: 'right' });
+      doc.text(periodText, 300, rightY, { width: 245, align: 'right' });
+      rightY += 14;
+    }
+    if (invoice.dueDate) {
+      doc.text(`Due date: ${invoice.dueDate.toISOString().slice(0, 10)}`, 300, rightY, { width: 245, align: 'right' });
+      rightY += 14;
+    }
+    if (invoice.paymentTerms) {
+      doc.text(`Payment terms: ${invoice.paymentTerms}`, 300, rightY, { width: 245, align: 'right' });
+      rightY += 14;
     }
 
     let leftY = 50;
@@ -441,6 +496,7 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
         `${addr.city}, ${addr.state} ${addr.postalCode}`,
         addr.country,
         `Tax ID: ${preparerIncorporation.taxId}`,
+        preparerPhone ? `Phone: ${preparerPhone}` : undefined,
       ]) {
         if (!line) continue;
         doc.text(line, 50, leftY, { width: 240 });
@@ -448,7 +504,7 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       }
     }
 
-    doc.y = Math.max(leftY + 10, invoice.period ? 144 : 130);
+    doc.y = Math.max(leftY + 10, rightY + 10);
     doc.moveDown(1.5);
 
     // Line items table
@@ -520,9 +576,27 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     doc.text('Total:', 300, y, { width: 130, align: 'right' });
     doc.text(`${invoice.currency} ${invoice.total.toFixed(2)}`, 440, y, { width: 80, align: 'right' });
 
+    // Reverse-charge / exemption legal mention — required text for exempt
+    // or intra-EU reverse-charge transactions, printed prominently near the
+    // totals rather than buried in the notes.
+    if (invoice.taxNote) {
+      doc.y = y + 30;
+      doc.font('Body-Bold').fontSize(10).text(invoice.taxNote, 50, doc.y, { width: 470 });
+    }
+
+    // Payment details — the bank account this invoice should be paid into.
+    if (preparerBankAccount) {
+      doc.moveDown(1.5);
+      doc.font('Body-Bold').fontSize(11).text('Payment details', { underline: true });
+      doc.font('Body').fontSize(10);
+      for (const line of formatBankAccountLines(preparerBankAccount)) {
+        doc.text(line);
+      }
+    }
+
     // Notes
     if (invoice.notes) {
-      doc.moveDown(3);
+      doc.moveDown(1.5);
       doc.font('Body').fontSize(10);
       doc.text('Notes:', { underline: true });
       doc.text(invoice.notes);

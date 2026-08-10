@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
 import * as invoicesService from '../../services/invoices.service'
+import { isBankAccountComplete } from '../../utils/bankAccount'
 import type { Invoice, ManualItemInput } from '../../types/invoice'
 import StatusPill from '../../components/ui/StatusPill.vue'
 import CurrencyDisplay from '../../components/ui/CurrencyDisplay.vue'
@@ -28,11 +29,14 @@ const auth = useAuthStore()
 const ui = useUiStore()
 
 // A collective invoice is issued under the creating manager's own
-// incorporated business — see Account settings. No profile, no collective
-// invoice; this mirrors a hard block enforced server-side too.
+// incorporated business, paid into their collective bank account — see
+// Account settings. Missing either, no collective invoice; this mirrors a
+// hard block enforced server-side too (two separate error codes there).
 const hasIncorporationProfile = computed(
   () => auth.user?.employmentType === 'contractor' && !!auth.user?.incorporation
 )
+const hasCollectiveBankAccount = computed(() => isBankAccountComplete(auth.user?.collectiveBankAccount))
+const canCreateCollective = computed(() => hasIncorporationProfile.value && hasCollectiveBankAccount.value)
 
 const { loading, run: load } = useAsyncAction(async () => {
   await Promise.all([
@@ -67,6 +71,9 @@ const pool = ref<Invoice[]>([])
 const selectedPoolIds = ref<Set<string>>(new Set())
 const notes = ref('')
 const manualItems = ref<ManualItemInput[]>([])
+const dueDate = ref('')
+const paymentTerms = ref('')
+const taxNote = ref('')
 
 function openCreate(): void {
   clientId.value = ''
@@ -76,6 +83,9 @@ function openCreate(): void {
   selectedPoolIds.value = new Set()
   notes.value = ''
   manualItems.value = []
+  dueDate.value = ''
+  paymentTerms.value = ''
+  taxNote.value = ''
   showCreate.value = true
 }
 
@@ -129,6 +139,9 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
     personalInvoiceIds: Array.from(selectedPoolIds.value),
     notes: notes.value || null,
     manualItems: manualItems.value.filter((m) => m.description.trim() !== ''),
+    dueDate: dueDate.value || null,
+    paymentTerms: paymentTerms.value || null,
+    taxNote: taxNote.value || null,
   })
   ui.success(`Collective invoice #${invoice.invoiceNumber} created.`)
   showCreate.value = false
@@ -140,7 +153,7 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
   <div class="max-w-2xl">
     <div class="mb-1 flex items-center justify-between">
       <h1 class="text-lg font-semibold text-surface-900">Invoicing pool</h1>
-      <AppButton :disabled="!hasIncorporationProfile" @click="openCreate">New collective invoice</AppButton>
+      <AppButton :disabled="!canCreateCollective" @click="openCreate">New collective invoice</AppButton>
     </div>
     <p class="mb-5 text-sm text-surface-500">
       Roll up sent personal invoices from the team into one collective invoice for a client — spanning every
@@ -150,6 +163,11 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
       A collective invoice is issued under your own incorporated business. Complete your
       <router-link :to="{ name: 'account' }" class="underline">employment & billing profile</router-link>
       as a contractor before creating one.
+    </p>
+    <p v-else-if="!hasCollectiveBankAccount" class="mb-5 rounded-md border border-warning-600/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+      A collective invoice needs a payout destination. Add your
+      <router-link :to="{ name: 'account' }" class="underline">collective bank account</router-link>
+      in Account settings before creating one.
     </p>
 
     <p v-if="loading" class="text-sm text-surface-500">Loading…</p>
@@ -219,6 +237,19 @@ const { loading: creating, run: createCollective } = useAsyncAction(async () => 
             </li>
           </ul>
         </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <FormField label="Due date">
+            <input v-model="dueDate" type="date" class="field-control" />
+          </FormField>
+          <FormField label="Payment terms" hint="e.g. Net 30">
+            <input v-model="paymentTerms" class="field-control" placeholder="Optional" />
+          </FormField>
+        </div>
+
+        <FormField label="Tax note" hint="e.g. reverse charge or exemption reference for EU intra-community transactions.">
+          <textarea v-model="taxNote" rows="2" class="field-control" placeholder="Optional" />
+        </FormField>
 
         <FormField label="Notes">
           <textarea v-model="notes" rows="2" class="field-control" placeholder="Optional" />

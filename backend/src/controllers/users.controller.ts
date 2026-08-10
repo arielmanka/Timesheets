@@ -23,6 +23,25 @@ const incorporationSchema = z
     companyName: z.string().min(1, 'Company name is required'),
     address: addressSchema,
     taxId: z.string().min(1, 'Tax ID is required'),
+    phone: z.string().nullable().optional(),
+  })
+  .nullable();
+
+// Deliberately generic — IBAN for EU accounts, routing+account number for
+// North American ones, or otherDetails as a free-text fallback. Only the
+// identity fields (holder, bank, country) are required here; whether a
+// routing method is actually present is checked separately (server-side, at
+// collective-invoice creation) via isBankAccountComplete.
+const bankAccountSchema = z
+  .object({
+    accountHolderName: z.string().min(1, 'Account holder name is required'),
+    bankName: z.string().min(1, 'Bank name is required'),
+    country: z.string().min(1, 'Country is required'),
+    iban: z.string().nullable().optional(),
+    swiftBic: z.string().nullable().optional(),
+    routingNumber: z.string().nullable().optional(),
+    accountNumber: z.string().nullable().optional(),
+    otherDetails: z.string().max(1000).nullable().optional(),
   })
   .nullable();
 
@@ -32,6 +51,8 @@ const updateProfileSchema = z.object({
   locale: z.string().min(2).max(10).optional(),
   employmentType: z.enum(['employee', 'contractor']).optional(),
   incorporation: incorporationSchema.optional(),
+  personalBankAccount: bankAccountSchema.optional(),
+  collectiveBankAccount: bankAccountSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------

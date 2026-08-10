@@ -4,6 +4,7 @@ import { TimeRecord, type ITimeRecord } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
 import { Client } from '../models/Client.js';
 import { User } from '../models/User.js';
+import { isBankAccountComplete } from '../models/shared/bankAccount.js';
 import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
@@ -22,6 +23,9 @@ export interface CreatePersonalInvoiceData {
   notes?: string | null;
   manualItems?: Array<{ description: string; amount: number }>;
   taxRules?: TaxRuleInput[];
+  dueDate?: Date | null;
+  paymentTerms?: string | null;
+  taxNote?: string | null;
 }
 
 export interface CreateCollectiveInvoiceData {
@@ -30,12 +34,18 @@ export interface CreateCollectiveInvoiceData {
   personalInvoiceIds?: string[];
   notes?: string | null;
   manualItems?: Array<{ description: string; amount: number }>;
+  dueDate?: Date | null;
+  paymentTerms?: string | null;
+  taxNote?: string | null;
 }
 
 export interface UpdateDraftData {
   notes?: string | null;
   manualItems?: Array<{ description: string; amount: number }>;
   taxRules?: TaxRuleInput[];
+  dueDate?: Date | null;
+  paymentTerms?: string | null;
+  taxNote?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,14 +158,35 @@ function recalcCollectiveTotals(invoice: IInvoice): void {
 }
 
 // ---------------------------------------------------------------------------
-// A contractor's incorporation profile, required to issue tax invoices.
+// A personal invoice's supply/service period — the EU/NA-required date
+// range the invoiced work actually covers — is always derived from the
+// dates of its included time records, never manually entered, so it can
+// never drift from what's actually being billed.
 // ---------------------------------------------------------------------------
-async function requireIncorporationProfile(userId: string): Promise<void> {
+function computePeriodFromRecords(records: ITimeRecord[]): { startDate: Date; endDate: Date } | null {
+  if (records.length === 0) return null;
+  const dates = records.map((r) => r.date.getTime());
+  return { startDate: new Date(Math.min(...dates)), endDate: new Date(Math.max(...dates)) };
+}
+
+// ---------------------------------------------------------------------------
+// A manager must be a contractor with a complete incorporation profile AND
+// a complete collective bank account before they can issue a collective
+// invoice — separate checks, separate error codes, so the UI can tell the
+// user exactly which one is missing.
+// ---------------------------------------------------------------------------
+async function requireCollectiveInvoicingProfile(userId: string): Promise<void> {
   const user = await User.findById(userId);
   if (!user || user.employmentType !== 'contractor' || !user.incorporation) {
     throw AppError.badRequest(
       'A complete incorporation profile (company name, address, tax ID) is required to create a collective invoice. Add it in Account settings first.',
       'INCORPORATION_PROFILE_REQUIRED'
+    );
+  }
+  if (!isBankAccountComplete(user.collectiveBankAccount)) {
+    throw AppError.badRequest(
+      'A complete collective bank account is required to create a collective invoice. Add it in Account settings first.',
+      'COLLECTIVE_BANK_ACCOUNT_REQUIRED'
     );
   }
 }
@@ -207,6 +238,10 @@ export async function createPersonalInvoice(
     manualItems: data.manualItems ?? [],
     notes: data.notes ?? null,
     currency: project.currency,
+    period: computePeriodFromRecords(records),
+    dueDate: data.dueDate ?? null,
+    paymentTerms: data.paymentTerms ?? null,
+    taxNote: data.taxNote ?? null,
     reconciled: false,
   });
 
@@ -281,6 +316,7 @@ export async function addTimeRecordToDraft(
   invoice.timeRecordIds.push(record._id);
 
   recalcTotals(invoice, invoice.taxes.map((t) => ({ name: t.name, rate: t.rate })));
+  invoice.period = computePeriodFromRecords(await TimeRecord.find({ _id: { $in: invoice.timeRecordIds } }));
   await invoice.save();
 
   record.invoiced = true;
@@ -321,6 +357,7 @@ export async function removeTimeRecordFromDraft(
   }
 
   recalcTotals(invoice, invoice.taxes.map((t) => ({ name: t.name, rate: t.rate })));
+  invoice.period = computePeriodFromRecords(await TimeRecord.find({ _id: { $in: invoice.timeRecordIds } }));
   await invoice.save();
 
   await TimeRecord.updateOne(
@@ -344,7 +381,7 @@ export async function createCollectiveInvoice(
   teamId: string,
   data: CreateCollectiveInvoiceData
 ): Promise<IInvoice> {
-  await requireIncorporationProfile(managerId);
+  await requireCollectiveInvoicingProfile(managerId);
 
   const client = await Client.findOne({ _id: data.clientId, teamId });
   if (!client) {
@@ -407,6 +444,9 @@ export async function createCollectiveInvoice(
     notes: data.notes ?? null,
     currency,
     period: data.period,
+    dueDate: data.dueDate ?? null,
+    paymentTerms: data.paymentTerms ?? null,
+    taxNote: data.taxNote ?? null,
     reconciled: false,
   });
 
@@ -553,6 +593,9 @@ export async function updateDraft(
   }
 
   if (data.notes !== undefined) invoice.notes = data.notes;
+  if (data.dueDate !== undefined) invoice.dueDate = data.dueDate;
+  if (data.paymentTerms !== undefined) invoice.paymentTerms = data.paymentTerms;
+  if (data.taxNote !== undefined) invoice.taxNote = data.taxNote;
   if (data.manualItems !== undefined) {
     invoice.manualItems = data.manualItems as unknown as IInvoice['manualItems'];
   }

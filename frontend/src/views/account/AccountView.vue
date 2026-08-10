@@ -4,10 +4,11 @@ import { useAuthStore } from '../../stores/auth'
 import * as usersService from '../../services/users.service'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
-import type { EmploymentType } from '../../types/user'
+import type { BankAccountDetails, EmploymentType } from '../../types/user'
 import FormField from '../../components/ui/FormField.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
+import BankAccountFields from '../../components/account/BankAccountFields.vue'
 
 const auth = useAuthStore()
 const ui = useUiStore()
@@ -38,6 +39,7 @@ const { loading: savingProfile, run: saveProfile } = useAsyncAction(async () => 
 const employmentType = ref<EmploymentType>('employee')
 const companyName = ref('')
 const taxId = ref('')
+const phone = ref('')
 const address = ref({ line1: '', line2: '', city: '', state: '', postalCode: '', country: '' })
 
 watchEffect(() => {
@@ -46,6 +48,7 @@ watchEffect(() => {
   if (auth.user.incorporation) {
     companyName.value = auth.user.incorporation.companyName
     taxId.value = auth.user.incorporation.taxId
+    phone.value = auth.user.incorporation.phone ?? ''
     address.value = { ...auth.user.incorporation.address, line2: auth.user.incorporation.address.line2 ?? '' }
   }
 })
@@ -55,11 +58,37 @@ const { loading: savingEmployment, run: saveEmployment } = useAsyncAction(async 
     employmentType: employmentType.value,
     incorporation:
       employmentType.value === 'contractor'
-        ? { companyName: companyName.value, taxId: taxId.value, address: { ...address.value, line2: address.value.line2 || null } }
+        ? {
+            companyName: companyName.value,
+            taxId: taxId.value,
+            phone: phone.value || null,
+            address: { ...address.value, line2: address.value.line2 || null },
+          }
         : null,
   })
   auth.setUser(updated)
   ui.success('Employment & billing details updated.')
+})
+
+// --- Bank accounts — personal (paid as an individual contributor) and
+// collective (paid on the team's behalf when issuing a collective invoice as
+// a manager) are kept separate since a manager may need both. -------------
+const personalBankAccount = ref<BankAccountDetails | null>(null)
+const collectiveBankAccount = ref<BankAccountDetails | null>(null)
+
+watchEffect(() => {
+  if (!auth.user) return
+  personalBankAccount.value = auth.user.personalBankAccount
+  collectiveBankAccount.value = auth.user.collectiveBankAccount
+})
+
+const { loading: savingBankAccounts, run: saveBankAccounts } = useAsyncAction(async () => {
+  const updated = await usersService.updateMyProfile({
+    personalBankAccount: personalBankAccount.value,
+    collectiveBankAccount: collectiveBankAccount.value,
+  })
+  auth.setUser(updated)
+  ui.success('Bank accounts updated.')
 })
 
 const showDeleteConfirm = ref(false)
@@ -125,6 +154,9 @@ const { loading: deleting, run: requestDeletion } = useAsyncAction(async () => {
         <FormField label="Tax ID" hint="VAT / Business Number / GST / HST registration number.">
           <input v-model="taxId" required class="field-control" />
         </FormField>
+        <FormField label="Phone">
+          <input v-model="phone" type="tel" class="field-control" />
+        </FormField>
         <fieldset class="rounded-md border border-surface-200 p-3">
           <legend class="px-1 text-xs font-medium text-surface-500">Company address</legend>
           <div class="space-y-3">
@@ -155,6 +187,29 @@ const { loading: deleting, run: requestDeletion } = useAsyncAction(async () => {
       </template>
 
       <AppButton type="submit" :loading="savingEmployment">Save changes</AppButton>
+    </form>
+
+    <form class="space-y-6 rounded-lg border border-surface-200 bg-white p-5" @submit.prevent="saveBankAccounts">
+      <div>
+        <h2 class="text-sm font-semibold text-surface-800">Bank accounts</h2>
+        <p class="mt-1 text-xs text-surface-500">
+          Your personal account is used on invoices you create for your own time. If you're a manager, your
+          collective account is used on collective invoices you issue on the team's behalf — a separate account
+          since the two may not be the same.
+        </p>
+      </div>
+
+      <fieldset class="rounded-md border border-surface-200 p-3">
+        <legend class="px-1 text-xs font-medium text-surface-500">Personal account</legend>
+        <BankAccountFields v-model="personalBankAccount" />
+      </fieldset>
+
+      <fieldset class="rounded-md border border-surface-200 p-3">
+        <legend class="px-1 text-xs font-medium text-surface-500">Collective account</legend>
+        <BankAccountFields v-model="collectiveBankAccount" />
+      </fieldset>
+
+      <AppButton type="submit" :loading="savingBankAccounts">Save changes</AppButton>
     </form>
 
     <div class="rounded-lg border border-danger-600/20 bg-white p-5">

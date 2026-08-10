@@ -52,7 +52,12 @@ export interface Invoice {
   currency: string
   partialPaymentAmount: number | null
   paymentDate: string | null
+  /** For a collective invoice, the client-billed period chosen at creation; for a personal invoice, auto-derived from its included time records. */
   period: { startDate: string; endDate: string } | null
+  dueDate: string | null
+  paymentTerms: string | null
+  /** Free-text legal mention (e.g. reverse charge) for exempt or intra-EU transactions. */
+  taxNote: string | null
   reconciled: boolean
   createdAt: string
   updatedAt: string
@@ -74,6 +79,9 @@ export interface CreatePersonalInvoiceInput {
   notes?: string | null
   manualItems?: ManualItemInput[]
   taxRules?: TaxRuleInput[]
+  dueDate?: string | null
+  paymentTerms?: string | null
+  taxNote?: string | null
 }
 
 export interface CreateCollectiveInvoiceInput {
@@ -82,12 +90,18 @@ export interface CreateCollectiveInvoiceInput {
   personalInvoiceIds?: string[]
   notes?: string | null
   manualItems?: ManualItemInput[]
+  dueDate?: string | null
+  paymentTerms?: string | null
+  taxNote?: string | null
 }
 
 export interface UpdateInvoiceDraftInput {
   notes?: string | null
   manualItems?: ManualItemInput[]
   taxRules?: TaxRuleInput[]
+  dueDate?: string | null
+  paymentTerms?: string | null
+  taxNote?: string | null
 }
 
 export interface ListInvoicesFilter {

@@ -48,6 +48,9 @@ const notes = ref('')
 const manualItems = ref<ManualItemInput[]>([])
 const taxName = ref('')
 const taxRate = ref<number | null>(null)
+const dueDate = ref('')
+const paymentTerms = ref('')
+const taxNote = ref('')
 
 function openWizard(): void {
   step.value = 1
@@ -58,6 +61,9 @@ function openWizard(): void {
   manualItems.value = []
   taxName.value = ''
   taxRate.value = null
+  dueDate.value = ''
+  paymentTerms.value = ''
+  taxNote.value = ''
   showWizard.value = true
 }
 
@@ -107,6 +113,9 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
     notes: notes.value || null,
     manualItems: manualItems.value.filter((m) => m.description.trim() !== ''),
     taxRules: taxName.value.trim() && taxRate.value ? [{ name: taxName.value.trim(), rate: taxRate.value }] : [],
+    dueDate: dueDate.value || null,
+    paymentTerms: paymentTerms.value || null,
+    taxNote: taxNote.value || null,
   })
   ui.success(`Invoice #${invoice.invoiceNumber} created as a draft.`)
   showWizard.value = false
@@ -170,6 +179,19 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
             </span>
           </li>
         </ul>
+
+        <div class="grid grid-cols-2 gap-3">
+          <FormField label="Due date">
+            <input v-model="dueDate" type="date" class="field-control" />
+          </FormField>
+          <FormField label="Payment terms" hint="e.g. Net 30">
+            <input v-model="paymentTerms" class="field-control" placeholder="Optional" />
+          </FormField>
+        </div>
+
+        <FormField label="Tax note" hint="e.g. reverse charge or exemption reference for EU intra-community transactions.">
+          <textarea v-model="taxNote" rows="2" class="field-control" placeholder="Optional" />
+        </FormField>
 
         <FormField label="Notes">
           <textarea v-model="notes" rows="2" class="field-control" placeholder="Optional" />

@@ -30,10 +30,12 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 - Two-tier model: personal invoices (one team member, one project) roll up into collective invoices (one client, spanning every project that client has)
 - A collective invoice only pools *sent* personal invoices — never raw time records directly — so each contributor controls what they've billed before it's consolidated
 - Each personal invoice carries its own tax rate (e.g. VAT), chosen at creation time; a collective invoice has no tax rate of its own — it simply totals what each pooled personal invoice already billed, at that person's own rate
-- Contractors can attach incorporation details (company name, address, tax ID) to their profile, printed on invoice exports; a collective invoice prints the creating manager's incorporation details and requires them to be a contractor with a complete profile
+- Contractors can attach incorporation details (company name, address, tax ID, phone) to their profile, printed on invoice exports; a collective invoice prints the creating manager's incorporation details and requires them to be a contractor with a complete profile
+- Two separate bank accounts per user — personal (for a member's own invoices) and collective (for invoices a manager issues on the team's behalf) — supporting both EU (IBAN/SWIFT) and North American (routing/account number) formats, plus a free-text fallback; creating a collective invoice is blocked until the manager's collective account is complete
+- EU/North America compliance fields: due date, payment terms (e.g. "Net 30"), and a free-text tax/legal note (e.g. a reverse-charge mention); a personal invoice's supply/service period is auto-derived from the dates of its included time records, never manually entered
 - Sequential, human-readable invoice numbers (`yyyymmdd-NNNNNN`, per team, never reused)
 - Draft → sent → paid/partially paid/overdue lifecycle, with the ability to revert a sent (not yet paid, not yet pooled) invoice back to draft
-- PDF and CSV export, with full Unicode font support (Polish, and other Latin-Extended-A text render correctly, unlike PDFKit's default fonts)
+- PDF and CSV export, including payment/bank details, due date, payment terms, and tax note, with full Unicode font support (Polish, and other Latin-Extended-A text render correctly, unlike PDFKit's default fonts)
 
 **Reporting**
 - Team time/cost summaries by project and by user, with CSV/PDF export
@@ -198,7 +200,7 @@ All routes are versioned under `/api/v1`. Team-scoped routes (`/teams/:teamId/..
 | Resource | Base path | Notes |
 |---|---|---|
 | Auth | `/api/v1/auth` | register, verify-email, login, refresh, logout, password reset |
-| Users | `/api/v1/users/me` | profile (incl. employment type / incorporation details), account deletion, cross-team time records |
+| Users | `/api/v1/users/me` | profile (incl. employment type / incorporation details, personal & collective bank accounts), account deletion, cross-team time records |
 | Teams | `/api/v1/teams` | create/list/get, membership & roles (manager-only) |
 | Clients | `/api/v1/teams/:teamId/clients` | create/update manager-only, list/get for any member |
 | Projects | `/api/v1/teams/:teamId/projects` | create/update manager-only |

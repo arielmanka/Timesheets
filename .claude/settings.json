@@ -73,7 +73,11 @@
       "Bash(git config *)",
       "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-invoice-report.mjs\")",
       "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-invoice-report-ui-only.mjs\")",
-      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-multicurrency-time-report.mjs\")"
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-multicurrency-time-report.mjs\")",
+      "Bash(node check-bank-accounts.mjs)",
+      "Bash(node fetch-pdf.mjs \"bank-mgr-dxoegf@example.com\" \"6a7a2a5f76f695c994e40b62\" \"6a7a2a5f76f695c994e40b7a\" \"personal-invoice.pdf\")",
+      "Bash(node fetch-pdf.mjs \"bank-mgr-dxoegf@example.com\" \"6a7a2a5f76f695c994e40b62\" \"6a7a2a5f76f695c994e40b8c\" \"collective-invoice.pdf\")",
+      "Bash(docker exec timesheets-mongo-1 mongosh --quiet --eval ' *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\ariel\\OneDrive\\Projects\\Timesheets\\backend\\src\\models"

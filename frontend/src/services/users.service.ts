@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { EmploymentType, IncorporationDetails, User } from '../types/user'
+import type { BankAccountDetails, EmploymentType, IncorporationDetails, User } from '../types/user'
 
 export async function getMyProfile(): Promise<User> {
   const { data } = await api.get<{ user: User }>('/users/me')
@@ -12,6 +12,8 @@ export async function updateMyProfile(input: {
   locale?: string
   employmentType?: EmploymentType
   incorporation?: IncorporationDetails | null
+  personalBankAccount?: BankAccountDetails | null
+  collectiveBankAccount?: BankAccountDetails | null
 }): Promise<User> {
   const { data } = await api.patch<{ user: User }>('/users/me', input)
   return data.user

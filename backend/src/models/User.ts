@@ -2,6 +2,7 @@ import mongoose, { Schema, type Document, type Model } from 'mongoose';
 import argon2 from 'argon2';
 import crypto from 'crypto';
 import { addressSchema, type IAddress } from './shared/address.js';
+import { bankAccountSchema, type IBankAccountDetails } from './shared/bankAccount.js';
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -21,6 +22,7 @@ export interface IIncorporationDetails {
   companyName: string;
   address: IAddress;
   taxId: string;
+  phone: string | null;
 }
 
 export interface IUser extends Document {
@@ -33,6 +35,12 @@ export interface IUser extends Document {
   locale: string;
   employmentType: EmploymentType;
   incorporation: IIncorporationDetails | null;
+  // A manager may also personally invoice their own time on a team, so
+  // these are kept separate: one account to be paid as an individual
+  // contributor, another to receive payment on the team's behalf when
+  // they issue a collective invoice.
+  personalBankAccount: IBankAccountDetails | null;
+  collectiveBankAccount: IBankAccountDetails | null;
   refreshTokens: IRefreshToken[];
   emailVerificationToken: string | null;
   emailVerificationExpiry: Date | null;
@@ -64,6 +72,7 @@ const incorporationSchema = new Schema<IIncorporationDetails>(
     companyName: { type: String, required: true, trim: true },
     address: { type: addressSchema, required: true },
     taxId: { type: String, required: true, trim: true },
+    phone: { type: String, default: null, trim: true },
   },
   { _id: false }
 );
@@ -116,6 +125,14 @@ const userSchema = new Schema<IUser>(
     },
     incorporation: {
       type: incorporationSchema,
+      default: null,
+    },
+    personalBankAccount: {
+      type: bankAccountSchema,
+      default: null,
+    },
+    collectiveBankAccount: {
+      type: bankAccountSchema,
       default: null,
     },
     refreshTokens: {
