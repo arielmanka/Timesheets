@@ -12,6 +12,10 @@ export interface ILineItem {
   rate: number;
   amount: number;
   timeRecordId: Types.ObjectId | null;
+  // Set only on a collective invoice's line item that represents a rolled-up
+  // personal invoice — lets removePersonalInvoiceFromPool find and drop the
+  // right line item precisely, rather than matching on description text.
+  personalInvoiceId: Types.ObjectId | null;
 }
 
 export interface IManualItem {
@@ -29,12 +33,19 @@ export interface IInvoice extends Document {
   invoiceNumber: number;
   type: InvoiceType;
   teamId: Types.ObjectId;
-  projectId: Types.ObjectId;
+  // Required for personal invoices (billed against one project); null for
+  // collective invoices, which are scoped to a client and can span every
+  // project that client has.
+  projectId: Types.ObjectId | null;
   clientId: Types.ObjectId;
   createdBy: Types.ObjectId;
   status: InvoiceStatus;
   timeRecordIds: Types.ObjectId[];
   personalInvoiceIds: Types.ObjectId[];
+  // Personal invoices only: the collective invoice currently pooling this
+  // one, if any. This is the single source of truth for the derived
+  // "in pool (draft/sent)" display state — never duplicated onto `status`.
+  includedInCollectiveInvoiceId: Types.ObjectId | null;
   lineItems: ILineItem[];
   manualItems: IManualItem[];
   notes: string | null;
@@ -61,6 +72,7 @@ const lineItemSchema = new Schema<ILineItem>(
     rate: { type: Number, required: true },
     amount: { type: Number, required: true },
     timeRecordId: { type: Schema.Types.ObjectId, ref: 'TimeRecord', default: null },
+    personalInvoiceId: { type: Schema.Types.ObjectId, ref: 'Invoice', default: null },
   },
   { _id: false }
 );
@@ -92,10 +104,12 @@ const periodSchema = new Schema(
 
 const invoiceSchema = new Schema<IInvoice>(
   {
+    // Not globally unique — see the compound index below. Numbering is
+    // per-team (InvoiceCounter is keyed by teamId), so uniqueness must be
+    // scoped the same way or two teams' first invoices collide.
     invoiceNumber: {
       type: Number,
       required: true,
-      unique: true,
     },
     type: {
       type: String,
@@ -111,7 +125,7 @@ const invoiceSchema = new Schema<IInvoice>(
     projectId: {
       type: Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      default: null,
     },
     clientId: {
       type: Schema.Types.ObjectId,
@@ -136,6 +150,11 @@ const invoiceSchema = new Schema<IInvoice>(
       type: Schema.Types.ObjectId,
       ref: 'Invoice',
     }],
+    includedInCollectiveInvoiceId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Invoice',
+      default: null,
+    },
     lineItems: [lineItemSchema],
     manualItems: [manualItemSchema],
     notes: {
@@ -188,8 +207,11 @@ const invoiceSchema = new Schema<IInvoice>(
 // ---------------------------------------------------------------------------
 // Indexes
 // ---------------------------------------------------------------------------
+invoiceSchema.index({ teamId: 1, invoiceNumber: 1 }, { unique: true });
 invoiceSchema.index({ teamId: 1, status: 1 });
 invoiceSchema.index({ projectId: 1 });
+invoiceSchema.index({ clientId: 1 });
+invoiceSchema.index({ includedInCollectiveInvoiceId: 1 });
 invoiceSchema.index({ createdBy: 1 });
 
 // ---------------------------------------------------------------------------

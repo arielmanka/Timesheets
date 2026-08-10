@@ -28,6 +28,12 @@ services:
       context: ./backend
       target: development
     env_file: .env
+    environment:
+      # Bind-mounted source under a cloud-synced folder (e.g. OneDrive) or some
+      # Docker Desktop backends don't reliably forward native file change
+      # events into the container — tsx watch silently stops picking up edits.
+      # Polling is slower but always works.
+      CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./backend/src:/app/src
       - /app/node_modules
@@ -49,6 +55,11 @@ services:
     build:
       context: ./frontend
       target: development
+    environment:
+      # See the backend service — same bind-mount file-watch caveat, also
+      # respected by Vite's watcher (paired with server.watch.usePolling in
+      # vite.config.ts).
+      CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ./frontend/src:/app/src
       - /app/node_modules

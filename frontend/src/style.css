@@ -86,3 +86,28 @@
     outline-offset: 2px;
   }
 }
+
+/* ==========================================================================
+   Shared form control styling — used via FormField.vue and raw <input>s.
+   Kept usable down to 375px viewports (NFR-4).
+   ========================================================================== */
+@layer components {
+  .field-control {
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-surface-300);
+    background-color: white;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-surface-900);
+  }
+  .field-control:focus {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 1px;
+    border-color: var(--color-primary-500);
+  }
+  .field-control:disabled {
+    background-color: var(--color-surface-100);
+    color: var(--color-surface-500);
+  }
+}

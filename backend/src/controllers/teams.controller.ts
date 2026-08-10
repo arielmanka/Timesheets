@@ -57,7 +57,8 @@ export async function listMine(req: Request, res: Response, next: NextFunction):
 // GET /teams/:teamId
 export async function getOne(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const team = await teamService.getTeamById(req.params.teamId as string);
+    const authReq = req as AuthenticatedRequest;
+    const team = await teamService.getTeamWithMembers(req.params.teamId as string, authReq.user.userId);
     res.json({ team });
   } catch (err) {
     next(err);

@@ -1,7 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import * as timeRecordService from '../services/timeRecord.service.js';
-import { Team } from '../models/Team.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
 import { AppError } from '../utils/errors.js';
@@ -42,16 +41,13 @@ export async function create(req: Request, res: Response, next: NextFunction): P
     const authReq = req as AuthenticatedRequest;
     const teamReq = req as unknown as TeamRequest;
 
-    const { record, overlapWarning } = await timeRecordService.createTimeRecord(
+    const record = await timeRecordService.createTimeRecord(
       data,
       authReq.user.userId,
       teamReq.team.teamId
     );
 
-    res.status(201).json({
-      record,
-      ...(overlapWarning.hasOverlap && { overlapWarning }),
-    });
+    res.status(201).json({ record });
   } catch (err) {
     next(err instanceof z.ZodError ? AppError.badRequest(err.errors[0].message, 'VALIDATION_ERROR') : err);
   }
@@ -67,6 +63,7 @@ export async function list(req: Request, res: Response, next: NextFunction): Pro
     const filter: timeRecordService.ListTimeRecordsFilter = {};
     if (req.query.userId) filter.userId = req.query.userId as string;
     if (req.query.projectId) filter.projectId = req.query.projectId as string;
+    if (req.query.clientId) filter.clientId = req.query.clientId as string;
     if (req.query.startDate) filter.startDate = new Date(req.query.startDate as string);
     if (req.query.endDate) filter.endDate = new Date(req.query.endDate as string);
     if (req.query.status) filter.status = req.query.status as 'pending' | 'approved' | 'rejected';
@@ -106,20 +103,25 @@ export async function update(req: Request, res: Response, next: NextFunction): P
   }
 }
 
+// DELETE /teams/:teamId/time-records/:recordId
+export async function remove(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    await timeRecordService.deleteTimeRecord(req.params.recordId as string, authReq.user.userId);
+    res.json({ message: 'Time record deleted' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // POST /teams/:teamId/time-records/:recordId/approve
 export async function approve(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const authReq = req as AuthenticatedRequest;
-    const teamReq = req as unknown as TeamRequest;
-
-    // Get team member count for self-approval check (UA-18)
-    const team = await Team.findById(teamReq.team.teamId);
-    const memberCount = team?.members.length ?? 0;
 
     const record = await timeRecordService.approveTimeRecord(
       req.params.recordId as string,
-      authReq.user.userId,
-      memberCount
+      authReq.user.userId
     );
 
     res.json({ record });

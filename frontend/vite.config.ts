@@ -19,5 +19,12 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    watch: {
+      // Bind-mounted source under a cloud-synced folder (e.g. OneDrive) or
+      // some Docker Desktop backends don't reliably forward native file
+      // change events into the container — edits silently stop hot-reloading.
+      // Polling is slower but always works.
+      usePolling: true,
+    },
   },
 })

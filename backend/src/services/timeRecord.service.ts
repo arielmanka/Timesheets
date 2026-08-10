@@ -25,7 +25,7 @@ export interface UpdateTimeRecordData {
   taskId?: string | null;
 }
 
-export interface OverlapWarning {
+export interface OverlapCheckResult {
   hasOverlap: boolean;
   overlappingRecords: Array<{ _id: string; startTime: Date; endTime: Date }>;
 }
@@ -37,7 +37,7 @@ export async function createTimeRecord(
   data: CreateTimeRecordData,
   userId: string,
   teamId: string
-): Promise<{ record: ITimeRecord; overlapWarning: OverlapWarning }> {
+): Promise<ITimeRecord> {
   // Verify project is active (CPT-8)
   const project = await Project.findById(data.projectId);
   if (!project) {
@@ -60,8 +60,15 @@ export async function createTimeRecord(
     throw AppError.badRequest('Duration must be at least 1 minute', 'INVALID_DURATION');
   }
 
-  // Check for overlaps (TR-8) — warning, not blocking
-  const overlapWarning = await checkOverlap(userId, data.date, startTime, endTime);
+  // A user cannot be logged as working two places at once — block overlap
+  // outright, across every project and task, not just the same one (TR-8).
+  const overlap = await checkOverlap(userId, data.date, startTime, endTime);
+  if (overlap.hasOverlap) {
+    throw AppError.conflict(
+      'This overlaps a time entry you already have logged for the same day.',
+      'TIME_OVERLAP'
+    );
+  }
 
   // Resolve rate (RB-5) and calculate cost (RB-6)
   const resolved = await resolveRate(
@@ -93,7 +100,7 @@ export async function createTimeRecord(
 
   logger.info({ recordId: record._id, userId, projectId: data.projectId }, 'Time record created');
 
-  return { record, overlapWarning };
+  return record;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +164,16 @@ export async function updateTimeRecord(
     }
     record.durationMinutes = durationMinutes;
 
+    // Re-check overlap against the edited times (TR-8) — an edit can just as
+    // easily create a conflict as a fresh entry can.
+    const overlap = await checkOverlap(userId, record.date, record.startTime, record.endTime, recordId);
+    if (overlap.hasOverlap) {
+      throw AppError.conflict(
+        'This overlaps a time entry you already have logged for the same day.',
+        'TIME_OVERLAP'
+      );
+    }
+
     // Re-resolve rate and recalculate cost
     const resolved = await resolveRate(
       record.projectId.toString(),
@@ -192,11 +209,41 @@ export async function updateTimeRecord(
 }
 
 // ---------------------------------------------------------------------------
+// Delete (mirrors the edit permission model: owner-only, not locked)
+// ---------------------------------------------------------------------------
+export async function deleteTimeRecord(recordId: string, userId: string): Promise<void> {
+  const record = await TimeRecord.findById(recordId);
+  if (!record) {
+    throw AppError.notFound('Time record not found');
+  }
+
+  if (record.userId.toString() !== userId) {
+    throw AppError.forbidden('You can only delete your own time records');
+  }
+
+  if (record.locked) {
+    throw AppError.badRequest('This time record is locked and cannot be deleted', 'RECORD_LOCKED');
+  }
+
+  if (record.invoiced) {
+    throw AppError.badRequest(
+      'This time record has been invoiced and cannot be deleted',
+      'RECORD_INVOICED'
+    );
+  }
+
+  await record.deleteOne();
+
+  logger.info({ recordId, userId }, 'Time record deleted');
+}
+
+// ---------------------------------------------------------------------------
 // List (UA-10, UA-11)
 // ---------------------------------------------------------------------------
 export interface ListTimeRecordsFilter {
   userId?: string;
   projectId?: string;
+  clientId?: string;
   startDate?: Date;
   endDate?: Date;
   status?: TimeRecordStatus;
@@ -233,7 +280,9 @@ export async function listTimeRecords(
   // Additional check: ensure records belong to projects in this team
   // by joining with project collection via populate or aggregation
   // For simplicity, we'll query project IDs in this team first
-  const projectIds = await Project.find({ teamId }).distinct('_id');
+  const projectFilter: Record<string, unknown> = { teamId };
+  if (filter.clientId) projectFilter.clientId = filter.clientId;
+  const projectIds = await Project.find(projectFilter).distinct('_id');
   query.projectId = filter.projectId
     ? filter.projectId
     : { $in: projectIds };
@@ -242,12 +291,14 @@ export async function listTimeRecords(
 }
 
 // ---------------------------------------------------------------------------
-// Approve (UA-12, UA-15, UA-18)
+// Approve (UA-12, UA-15)
+// Deliberately does NOT enforce UA-18 (manager can't approve their own
+// record unless sole team member) — product direction has ruled that
+// restriction out; a manager may always approve their own time.
 // ---------------------------------------------------------------------------
 export async function approveTimeRecord(
   recordId: string,
-  managerId: string,
-  teamMemberCount: number
+  managerId: string
 ): Promise<ITimeRecord> {
   const record = await TimeRecord.findById(recordId);
   if (!record) {
@@ -258,14 +309,6 @@ export async function approveTimeRecord(
     throw AppError.badRequest(
       `Cannot approve a record with status '${record.status}'`,
       'INVALID_STATUS'
-    );
-  }
-
-  // Manager cannot approve own record unless sole member (UA-18)
-  if (record.userId.toString() === managerId && teamMemberCount > 1) {
-    throw AppError.badRequest(
-      'Managers cannot approve their own time records',
-      'SELF_APPROVAL'
     );
   }
 
@@ -317,7 +360,7 @@ export async function checkOverlap(
   startTime: Date,
   endTime: Date,
   excludeId?: string
-): Promise<OverlapWarning> {
+): Promise<OverlapCheckResult> {
   const filter: Record<string, unknown> = {
     userId,
     date,

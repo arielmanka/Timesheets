@@ -45,6 +45,74 @@ export async function getTeamById(teamId: string): Promise<ITeam> {
 }
 
 // ---------------------------------------------------------------------------
+// Get a single team by ID, with member identities resolved for display.
+// Read-only — uses a separate populated query so the authorization-critical
+// `Team.findById` path (accessControl middleware, mutation services below,
+// which compare `member.userId.toString()`) is never touched by populate.
+// ---------------------------------------------------------------------------
+export interface TeamMemberProfile {
+  userId: string;
+  role: TeamRole;
+  hourlyRate: number | null;
+  joinedAt: Date;
+  uid: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+export async function getTeamWithMembers(
+  teamId: string,
+  requestingUserId: string
+): Promise<{
+  _id: string;
+  name: string;
+  creatorId: string;
+  members: TeamMemberProfile[];
+  createdAt: Date;
+  updatedAt: Date;
+}> {
+  const team = await Team.findById(teamId).populate<{
+    members: Array<{
+      userId: { _id: string; uid: string; firstName: string; lastName: string; email: string };
+      role: TeamRole;
+      hourlyRate: number | null;
+      joinedAt: Date;
+    }>;
+  }>('members.userId', 'uid firstName lastName email');
+
+  if (!team) {
+    throw AppError.notFound('Team not found');
+  }
+
+  // RB-8: hourly rates must never be exposed to a regular (non-manager) viewer.
+  const requesterIsManager = team.members.some(
+    (m) => m.userId?._id?.toString() === requestingUserId && m.role === 'manager'
+  );
+
+  return {
+    _id: team._id.toString(),
+    name: team.name,
+    creatorId: team.creatorId.toString(),
+    createdAt: team.createdAt,
+    updatedAt: team.updatedAt,
+    members: team.members
+      // A member whose user document was deleted would populate to null — skip defensively.
+      .filter((m) => m.userId && typeof m.userId === 'object')
+      .map((m) => ({
+        userId: m.userId._id.toString(),
+        role: m.role,
+        hourlyRate: requesterIsManager ? m.hourlyRate : null,
+        joinedAt: m.joinedAt,
+        uid: m.userId.uid,
+        firstName: m.userId.firstName,
+        lastName: m.userId.lastName,
+        email: m.userId.email,
+      })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Search user by UID — exact match (UA-6)
 // ---------------------------------------------------------------------------
 export async function searchUserByUid(uid: string): Promise<{ _id: string; uid: string; firstName: string; lastName: string; email: string } | null> {

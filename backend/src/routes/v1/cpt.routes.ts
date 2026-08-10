@@ -43,6 +43,7 @@ router.patch('/:teamId/projects/:projectId/tasks/:taskId', requireTeamMember, ta
 router.post('/:teamId/time-records', requireTeamMember, timeRecordsController.create);
 router.get('/:teamId/time-records', requireTeamMember, timeRecordsController.list);
 router.patch('/:teamId/time-records/:recordId', requireTeamMember, timeRecordsController.update);
+router.delete('/:teamId/time-records/:recordId', requireTeamMember, timeRecordsController.remove);
 router.post('/:teamId/time-records/:recordId/approve', requireManager, timeRecordsController.approve);
 router.post('/:teamId/time-records/:recordId/reject', requireManager, timeRecordsController.reject);
 
@@ -55,6 +56,10 @@ router.get('/:teamId/invoices', requireTeamMember, invoicesController.list);
 router.get('/:teamId/invoices/:invoiceId', requireTeamMember, invoicesController.getOne);
 router.patch('/:teamId/invoices/:invoiceId', requireTeamMember, invoicesController.updateDraft);
 router.delete('/:teamId/invoices/:invoiceId', requireTeamMember, invoicesController.deleteDraft);
+router.post('/:teamId/invoices/:invoiceId/time-records', requireTeamMember, invoicesController.addTimeRecord);
+router.delete('/:teamId/invoices/:invoiceId/time-records/:recordId', requireTeamMember, invoicesController.removeTimeRecord);
+router.post('/:teamId/invoices/:invoiceId/pool/:personalInvoiceId', requireManager, invoicesController.addToPool);
+router.delete('/:teamId/invoices/:invoiceId/pool/:personalInvoiceId', requireManager, invoicesController.removeFromPool);
 router.post('/:teamId/invoices/:invoiceId/send', requireTeamMember, invoicesController.send);
 router.post('/:teamId/invoices/:invoiceId/payment', requireManager, invoicesController.recordPayment);
 router.get('/:teamId/invoices/:invoiceId/pdf', requireTeamMember, invoicesController.exportPdf);
