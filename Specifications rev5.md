@@ -1,0 +1,180 @@
+# Functional and Technical Specification
+
+## Project, Task, and Time Tracking Application
+
+**Revision 6** — supersedes Revision 5
+
+*Reflects the invoicing bank-account and compliance enhancements built since Revision 5, and a full audit of every Revision 5 requirement against the current implementation.*
+
+## Legend
+
+- **(NEW)** — requirement added in this revision.
+- **(REVISED)** — requirement reworded from Revision 5, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
+- **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
+- Unmarked items are unchanged from Revision 5.
+
+## Summary of Changes from Revision 5
+
+This revision documents two things. First, the invoicing enhancements built after Revision 5: separate personal and collective bank account details per user (supporting EU IBAN/SWIFT and North American routing/account formats, plus a free-text fallback), invoice due dates and payment terms, a free-text tax/legal note for reverse-charge and exemption mentions, an auto-derived supply/service period on personal invoices, and a phone number on a contractor's incorporation profile. Second, a full audit of every Revision 5 requirement against the deployed application. Several requirements have been reworded **(REVISED)** to match deliberate implementation decisions — for example, time-record overlap is enforced as a hard block rather than a warning, and MongoDB multi-document transactions were replaced with a two-phase write/reconcile pattern because the database runs as a standalone instance without a replica set. Others are marked **(GAP)** where the current implementation does not yet fully satisfy the written requirement; each is listed with its practical impact in [Known Implementation Gaps](#known-implementation-gaps) at the end of this document, so open work stays visible rather than silently assumed done.
+
+---
+
+## Time Recording
+
+- **TR-1** — The software must record the time that a user does work. Every time record must be associated with exactly one project and, where applicable, one task.
+- **TR-2** — The software must not use a live timer.
+- **TR-3** — The user must write time data manually into a digital form.
+- **TR-4** — The frontend software must use a calendar widget to let the user select the date and the time.
+- **TR-5** — The software must let the user change recorded time data, except where the record has been approved and locked (see UA-16).
+- **TR-6** — The software must let the user mark a time record as billable or not billable.
+- **TR-7** — The software must record time to a minimum granularity of one minute, and must reject a time record where the end time is not later than the start time.
+- **TR-8** *(REVISED)* — The software must prevent (not merely warn against) saving a new or edited time record that overlaps an existing time record for the same user on the same date — checked across every project and task the user has logged time against that day, not only the same project and task.
+- **TR-9** — The software must let the user attach a free-text note (up to 1,000 characters) to a time record.
+- **TR-10** — The backend software must retain a change history for each time record, capturing the prior value, the new value, the user who made the change, and the timestamp of the change.
+
+## Clients, Projects, and Tasks
+
+- **CPT-1** — The software must let the user with the manager role make a new client record.
+- **CPT-2** — A client record must contain a name, a billing contact person, a billing email address, a billing address, and, where applicable, a tax identification number.
+- **CPT-3** — The software must let the user with the manager role make a new project.
+- **CPT-4** — The software must connect a project to one client record.
+- **CPT-5** — The software must let the user with the manager role make new tasks for a project.
+- **CPT-6** *(REVISED)* — The software must let the user with the manager role change the status of a project, subject to a defined set of allowed transitions — complete and cancelled are terminal states that cannot transition to any other status.
+- **CPT-7** — The project status options are active, on hold, complete, and cancelled.
+- **CPT-8** *(REVISED)* — The software must prevent new time records from being created against a project with a status of on hold, complete, or cancelled, or with a date falling outside that project's configured start/end date range (see CPT-9).
+- **CPT-9** — The software must let the user with the manager role set a start and end date for a project.
+- **CPT-10** *(GAP)* — The software must let a manager optionally set an estimated-hours or monetary budget for a project, and must let a manager view recorded time or cost against that budget.
+- **CPT-11** — The backend software must calculate the total time recorded for a project.
+- **CPT-12** *(GAP)* — A task must have a status of open, in progress, or done. The status may be set by a manager or by the team member assigned to the task.
+- **CPT-13** *(GAP)* — The software must let a manager assign a task to one member of the collaborative team.
+
+## Rates and Billing
+
+- **RB-1** — The software must let a user with the manager role set an hourly monetary rate for a team member.
+- **RB-2** — The software must let a user with the manager role set the currency for the project.
+- **RB-3** — The software must let a user with the manager role set an hourly monetary rate for a project.
+- **RB-4** *(GAP)* — The software must let a user with the manager role set an hourly monetary rate for a specific task.
+- **RB-5** — The backend software must resolve exactly one rate for each time record using the following precedence: (1) the task rate, if set; (2) otherwise the project rate, if set; (3) otherwise the team member's rate. The resolved rate must be used for cost calculation.
+- **RB-6** — The backend software must calculate the cost of a time record using the resolved rate at the time the record is created, and must store the calculated cost on the record. A later change to a team member's, project's, or task's rate must not retroactively alter the cost of previously calculated time records.
+- **RB-7** *(GAP)* — The software must let the user group and view total cost by project, by task, or by user, subject to the access rules in Section 6.
+- **RB-8** *(GAP)* — The software must not let the regular user view the hourly rate of other users, or of a project or task.
+- **RB-9** *(GAP)* — The software must let a regular user view the calculated cost of their own time records without exposing the underlying hourly rate of a user, project, or task they are not authorized to view.
+- **RB-10** *(REVISED)* — The software must calculate and store each time record's cost using the currency configured for its project at the moment the record is created, and must retain that currency as an immutable snapshot on the record even if the project's currency setting is changed afterward. Any view or export that aggregates cost across multiple time records or invoices — reports, invoice pools, budget totals — must group and total by each record's own currency rather than summing figures from different currencies together.
+
+## Invoices
+
+- **INV-1** — The software must make an invoice from billable time records that have not already been included on another invoice.
+- **INV-2** — The software must group the time records by client to make the invoice.
+- **INV-3** — The software must let the user add manual text to the invoice.
+- **INV-4** — The software must let the user add manual cost items to the invoice.
+- **INV-5** — The software must let the user change the invoice data before transmission.
+- **INV-6** — The software must let the user export the invoice to a CSV file.
+- **INV-7** — The software must let the user export the invoice to a PDF file.
+- **INV-8** — The software must let the user record the date when the client pays the invoice.
+- **INV-9** *(REVISED)* — The software must let any team member generate a personal invoice for their own approved, billable, un-invoiced time on a project — not limited to contractors billing B2B.
+- **INV-10** — The software must store a user's personal invoice in a collective invoicing pool for the project.
+- **INV-11** — The software must let the user with the manager role create, view, and transmit a collective invoice to the client.
+- **INV-12** — The collective invoice must group and include all personal invoices from the invoicing pool for a selected period.
+- **INV-13** *(REVISED)* — The software must build a collective invoice exclusively from personal invoices that their owner has already created and sent — direct inclusion of un-invoiced time records by the manager, as specified in Revision 5, has been removed from product scope. Every contributor must issue and send their own personal invoice before their time can be consolidated into a collective invoice.
+- **INV-14** — The software must mark a time record as invoiced once it is included on any invoice, and must exclude invoiced time records from future invoice generation. If a draft invoice is deleted before transmission, its time records must be unmarked as invoiced.
+- **INV-15** *(REVISED)* — The software must assign each invoice a sequential invoice number, unique within its team, in the format `yyyymmdd-NNNNNN` (creation date plus a 6-digit, zero-padded, per-team sequence that never resets or reuses a number).
+- **INV-16** *(GAP)* — An invoice must have a status of draft, sent, paid, partially paid, or overdue, and must support recording a partial payment amount.
+- **INV-17** *(REVISED)* — The software must let the user choose one or more concurrent tax rules (name and rate) on a personal invoice, applied at creation or while it remains a draft. A collective invoice has no tax rate of its own — its total is the sum of each pooled personal invoice's own gross amount, with each retaining the tax rate its owner applied.
+- **INV-18** *(NEW)* — The software must let a user record two separate sets of bank account details on their profile: a personal account, used on personal invoices they create, and a collective account, used on collective invoices they issue as a manager on the team's behalf.
+- **INV-19** *(NEW)* — A bank account record must support both EU-style details (IBAN, SWIFT/BIC) and North American-style details (routing number, account number), plus a free-text field for any other routing scheme (sort code, IFSC, correspondent bank information, etc.). An account is considered complete only once it has an account holder name, bank name, country, and at least one of: an IBAN, a routing number plus account number, or free-text details.
+- **INV-20** *(NEW)* — The software must block a manager from creating a collective invoice if their profile's collective bank account is not complete (see INV-19), with an error distinct from the existing incorporation-profile guard (see INV-9 predecessor requirements) so the user can tell which is missing.
+- **INV-21** *(NEW)* — The software must let the user set a due date and free-text payment terms (for example, "Net 30") on a personal or collective invoice, displayed on the invoice detail view and included in its PDF and CSV exports.
+- **INV-22** *(NEW)* — The software must let the user attach a free-text tax/legal note to an invoice (for example, a reverse-charge or exemption reference for an intra-EU transaction), displayed prominently on the invoice and included in its PDF and CSV exports.
+- **INV-23** *(NEW)* — For a personal invoice, the software must automatically derive its supply/service period from the minimum and maximum date of its included time records, recalculated whenever a time record is added to or removed from the draft — the period must never be manually entered on a personal invoice. A collective invoice retains its own manually chosen period, set at creation.
+- **INV-24** *(NEW)* — A contractor's incorporation profile must support an optional phone number, printed alongside the company's other details on invoice exports.
+
+## Reports and Data
+
+- **RPT-1** — The software must show a summary of the recorded time and the total cost.
+- **RPT-2** — The software must let the user select a start date and an end date for the summary.
+- **RPT-3** — The software must filter the data by user, by client, by project, and by task.
+- **RPT-4** — The software must let the user export the data to a CSV file.
+- **RPT-5** — The software must let the user export the data to a PDF file.
+- **RPT-6** — Report and export data must be scoped by the access rules in Section 6: a regular user must see only their own data; a manager must see only the data of their collaborative team.
+- **RPT-7** *(NEW)* — The software must provide a separate invoice-focused report: invoice counts by status, and totals invoiced/paid/outstanding grouped by currency and broken down by client, with the same CSV/PDF export and access-rule scoping as RPT-4 through RPT-6.
+
+## User Access and Collaborative Teams
+
+- **UA-1** — The software must operate as a self-managed system without a central administrator.
+- **UA-2** — The software must let a person register a new user account using an email address, and must send a verification link to that address. The account must remain inactive until the email address is verified.
+- **UA-3** — The software must generate a unique, 24-character hexadecimal user identification string (UID) for each user, using a cryptographically secure random source generated independently of any database primary key.
+- **UA-4** — The software must let a registered user make a collaborative team.
+- **UA-5** — The software must let a user be a member of more than one collaborative team.
+- **UA-6** — The software must let a user search the system for other registered users by an exact, full match on their user identification string (UID).
+- **UA-7** — The software must let a user add a searched user to their collaborative team.
+- **UA-8** — The software must let a user assign the manager role to one or more members of their collaborative team.
+- **UA-9** *(GAP)* — The software must let the team creator, or a user with the manager role, remove a member from the collaborative team, revoke a member's manager role, and delete a team.
+- **UA-10** — A user must see only their own time records.
+- **UA-11** — A manager must see time records of their collaborative team.
+- **UA-12** — A manager must be able to approve a time record for a team member.
+- **UA-13** — A manager must be able to reject a time record for a team member.
+- **UA-14** — A rejected time record becomes editable by the user.
+- **UA-15** — The backend software must lock an approved time record.
+- **UA-16** — A user must not change a locked time record.
+- **UA-17** — The software must let an unauthenticated user request a password reset by providing a verified email address, without requiring intervention from another user.
+- **UA-18** *(REVISED — removed)* — A manager may approve their own time record. The Revision 5 restriction against self-approval (except for a sole team member) has been removed from product scope.
+- **UA-19** *(REVISED / GAP)* — The software must let a user file a request for account deletion, which records the request timestamp on their account for review, subject to statutory retention requirements for financial records; invoiced time records may be retained in an anonymized form. (See [Known Implementation Gaps](#known-implementation-gaps): the request is currently recorded but not yet acted on automatically.)
+- **UA-20** *(NEW)* — A user must be able to view, read-only, their own time records logged across every collaborative team they belong to — not only the team currently selected — to help them understand a cross-team overlap block (see TR-8).
+
+## Technical Specifications and Architecture
+
+- **TECH-1** — The system must use a client-server architecture.
+- **TECH-2** — The developer must write the backend software in TypeScript using Node.js and the Express framework.
+- **TECH-3** — The developer must write the frontend software in TypeScript using Vite and Vue.js.
+- **TECH-4** — The frontend software must not use React.
+- **TECH-5** — The frontend software must use Tailwind CSS for the visual design.
+- **TECH-6** — The system must use JSON Web Tokens (JWT) for authentication.
+- **TECH-7** *(GAP)* — The system must issue short-lived JWT access tokens (recommended maximum lifetime: 15 minutes) paired with a refresh-token mechanism, and must support revoking a refresh token on logout or role change.
+- **TECH-8** — The frontend software must send the JWT in the header of each API request.
+- **TECH-9** — The backend software must store the primary data in a MongoDB database.
+- **TECH-10** — The backend software must use Mongoose to model the MongoDB data.
+- **TECH-11** *(REVISED / GAP)* — Because the system runs MongoDB as a standalone instance without a replica set, native multi-document ACID transactions are not available to it. Instead, any operation that writes to more than one collection as part of a single business action (for example, invoice generation) must use a two-phase write pattern: the primary document is saved in an unreconciled state, dependent documents are then updated, and the primary document is finally marked reconciled. A reconciliation pass must detect and repair — or safely discard, if stale — any operation left unreconciled by a crash or restart. (See [Known Implementation Gaps](#known-implementation-gaps): this reconciliation pass currently runs only at server startup and via a manual internal endpoint, not on a recurring schedule.)
+- **TECH-12** — The developer must put the frontend software, the backend software, and the databases into Docker containers. The backend software must use persistent storage volumes to retain database data outside of the container lifecycle.
+- **TECH-13** — The software must run in a container platform as self-managed Docker processes.
+- **TECH-14** — The front end must communicate with the backend using a REST API.
+- **TECH-15** *(GAP)* — Client-server communication must use TLS terminated at the load balancer. Inter-service communication inside the container platform does not require TLS. Sensitive fields, including password hashes, must be encrypted at rest.
+- **TECH-16** — Passwords must be stored using a modern adaptive hashing algorithm (Argon2) with a unique per-user salt.
+- **TECH-17** — The backend must apply rate limiting to authentication and registration endpoints.
+- **TECH-18** *(GAP)* — The system must run automated daily backups of the MongoDB data with a defined retention period, and must support point-in-time restore.
+- **TECH-19** — The REST API must be versioned in its URL path (for example, `/api/v1/...`).
+- **TECH-20** *(REVISED)* — The backend must emit structured logs and expose health (`/healthz`) and readiness (`/readyz`, including live database connectivity) endpoints, consumed by the container platform's own health-check mechanism — currently Docker Compose, rather than Kubernetes.
+- **TECH-21** *(GAP)* — The system must maintain separate development, staging, and production environments.
+- **TECH-22** *(NEW)* — The backend must attach a correlation ID to each incoming request and include it in that request's structured log entries.
+- **TECH-23** *(NEW)* — The backend must apply standard HTTP security headers, and the reverse proxy must apply a request-rate limit across the entire API surface in addition to the backend's own per-endpoint limiting (see TECH-17).
+
+## Non-Functional Requirements
+
+- **NFR-1** — For the initial release, the system does not require specific uptime or response time metrics.
+- **NFR-2** — The system must comply with applicable data protection regulation (for example, GDPR) for any personal data it stores, including support for data access and deletion requests (see UA-19).
+- **NFR-3** *(GAP)* — The frontend should meet WCAG 2.1 AA accessibility guidelines where practicable.
+- **NFR-4** *(GAP)* — The frontend must be usable for time entry on mobile viewport widths down to 375 pixels.
+- **NFR-5** — Dates and times must be displayed according to the user's locale; monetary values must be displayed using the currency stored on the record or invoice being shown (see RB-10).
+- **NFR-6** *(GAP)* — The backend must retain an immutable audit log of rate changes, time record approvals and rejections, and invoice generation events. The system must enforce a built-in 7-year data retention policy.
+
+---
+
+## Known Implementation Gaps
+
+This section lists every requirement above marked **(GAP)**, with its practical impact, so open work stays visible to stakeholders rather than being silently assumed complete.
+
+- **CPT-10** — A project's budget-vs-actual view only totals cost in the first currency it encounters. If a project's currency is changed after time has already been logged against it, the budget progress display silently ignores cost recorded in the earlier currency.
+- **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team.
+- **RB-4** — Setting a task's hourly rate has the same gap as CPT-12/13: the API does not restrict this to managers, though the UI does.
+- **RB-7** — The backend computes and returns a "cost by task" breakdown alongside "by project" and "by user," but the Reports page does not currently render a by-task table.
+- **RB-8, RB-9** — Hourly-rate redaction for non-managers is enforced only in the frontend (a UI component hides the value unless the viewer is a manager). The API itself returns each time record's full resolved rate regardless of the caller's role, so a regular user calling the API directly could read a rate they're not authorized to view.
+- **INV-16** — The overdue status exists and can be reached, but nothing currently transitions a sent invoice to overdue automatically based on its due date (see INV-21); this would need to be a scheduled check.
+- **UA-9** — The team record does track its original creator, but authorization currently checks only the current manager role. If a creator is later demoted from manager by someone else, they lose the ability to remove members, revoke roles, or delete the team that the written requirement intends them to keep.
+- **UA-19** — Filing a deletion request only timestamps the account for manual review; there is no automated pipeline yet that actually erases account data, anonymizes invoiced time records, or otherwise acts on the request.
+- **TECH-7** — Revoking a refresh token on a role change is not implemented (logout-time revocation is). Impact is limited because role is looked up live from the database on every request rather than being embedded in the access token, but the written requirement is not literally met.
+- **TECH-11** — The reconciliation pass for the two-phase write pattern (see main entry above) runs only at server startup and via a manual, non-public internal endpoint. An operation interrupted mid-way (for example, by a crash) stays unreconciled until the next restart or a manual trigger — there is no recurring scheduled sweep.
+- **TECH-15** — Beyond password hashing, no field-level encryption at rest exists for other sensitive fields introduced by this and prior revisions — bank account numbers/IBANs (INV-18/19), tax IDs, and similar data are stored as plain strings.
+- **TECH-18** — A backup script exists and performs a real, retention-aware `mongodump`, but it is not wired into any scheduler, cron job, or CI/CD pipeline — it must be run manually. "Automated daily backups" and point-in-time restore are not yet in place.
+- **TECH-21** — Only a single Docker Compose configuration exists. There is no separate staging or production environment, configuration, or infrastructure — this remains aspirational.
+- **NFR-3** — Accessibility support is inconsistent: some components have ARIA attributes, focus styling, and screen-reader-only text, but there is no systematic accessibility coverage or testing across the frontend.
+- **NFR-4** — No dedicated mobile time-entry layout or 375px breakpoint testing was found; the frontend relies on Tailwind's general responsive utilities rather than a verified mobile-specific design.
+- **NFR-6** — Two distinct problems. First, audit log coverage is incomplete: only invoice-generation events are currently written to the immutable audit log; time record approvals/rejections and rate changes are only written to the general application log, not the audit log the requirement calls for. Second, the 7-year retention-enforcement function exists in code but is never invoked by anything — no scheduled job, startup hook, or route calls it, so the policy is defined but not actually enforced.
