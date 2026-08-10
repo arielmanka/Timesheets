@@ -101,17 +101,20 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     doc.fontSize(20).text('Time Report', { align: 'center' });
     doc.moveDown();
 
-    // Summary
+    // Summary — cost is broken out per currency rather than summed
+    // together, since different projects can bill in different currencies.
     doc.fontSize(12);
     doc.text(`Total Hours: ${result.totalHours}`);
-    doc.text(`Total Cost: ${result.currency} ${result.totalCost.toFixed(2)}`);
+    for (const c of result.costByCurrency) {
+      doc.text(`Total Cost (${c.currency}): ${c.totalCost.toFixed(2)}`);
+    }
     doc.moveDown();
 
     // By Project
     doc.fontSize(14).text('By Project', { underline: true });
     doc.fontSize(10);
     for (const entry of result.byProject) {
-      doc.text(`  ${entry.projectName}: ${entry.hours}h — ${result.currency} ${entry.cost.toFixed(2)}`);
+      doc.text(`  ${entry.projectName}: ${entry.hours}h — ${entry.currency} ${entry.cost.toFixed(2)}`);
     }
     doc.moveDown();
 
@@ -119,7 +122,123 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     doc.fontSize(14).text('By User', { underline: true });
     doc.fontSize(10);
     for (const entry of result.byUser) {
-      doc.text(`  ${entry.userId}: ${entry.hours}h — ${result.currency} ${entry.cost.toFixed(2)}`);
+      doc.text(`  ${entry.userId}: ${entry.hours}h — ${entry.currency} ${entry.cost.toFixed(2)}`);
+    }
+
+    doc.end();
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Invoice report — per client, by status, paid vs outstanding
+// ---------------------------------------------------------------------------
+function parseInvoiceReportFilter(req: Request): reportService.InvoiceReportFilter {
+  const teamReq = req as unknown as TeamRequest;
+  const filter: reportService.InvoiceReportFilter = { teamId: teamReq.team.teamId };
+
+  if (req.query.startDate) filter.startDate = new Date(req.query.startDate as string);
+  if (req.query.endDate) filter.endDate = new Date(req.query.endDate as string);
+  if (req.query.clientId) filter.clientId = req.query.clientId as string;
+  if (req.query.status) filter.status = req.query.status as reportService.InvoiceReportFilter['status'];
+  if (req.query.type) filter.type = req.query.type as reportService.InvoiceReportFilter['type'];
+  if (req.query.paid !== undefined) filter.paid = req.query.paid === 'true';
+
+  return filter;
+}
+
+// GET /teams/:teamId/reports/invoices
+export async function invoiceReport(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const isManager = teamReq.team.role === 'manager';
+
+    const result = await reportService.getInvoiceReport(
+      parseInvoiceReportFilter(req),
+      isManager,
+      authReq.user.userId
+    );
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /teams/:teamId/reports/invoices/export/csv
+export async function exportInvoicesCsv(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const isManager = teamReq.team.role === 'manager';
+
+    const rows = await reportService.getInvoiceExportData(
+      parseInvoiceReportFilter(req),
+      isManager,
+      authReq.user.userId
+    );
+
+    const { stringify } = await import('csv-stringify/sync');
+    const csv = stringify(rows, { header: true });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="invoice-report.csv"');
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /teams/:teamId/reports/invoices/export/pdf
+export async function exportInvoicesPdf(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const isManager = teamReq.team.role === 'manager';
+
+    const result = await reportService.getInvoiceReport(
+      parseInvoiceReportFilter(req),
+      isManager,
+      authReq.user.userId
+    );
+
+    const PDFDocument = (await import('pdfkit')).default;
+    const doc = new PDFDocument({ margin: 50 });
+    doc.registerFont('Body', FONT_REGULAR);
+    doc.font('Body');
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="invoice-report.pdf"');
+    doc.pipe(res);
+
+    doc.fontSize(20).text('Invoice Report', { align: 'center' });
+    doc.moveDown();
+
+    doc.fontSize(14).text('Totals by currency', { underline: true });
+    doc.fontSize(10);
+    for (const t of result.totalsByCurrency) {
+      doc.text(
+        `  ${t.currency} — Invoiced: ${t.totalInvoiced.toFixed(2)}  Paid: ${t.totalPaid.toFixed(2)}  Outstanding: ${t.totalOutstanding.toFixed(2)}  (${t.count} invoices)`
+      );
+    }
+    doc.moveDown();
+
+    doc.fontSize(14).text('By client', { underline: true });
+    doc.fontSize(10);
+    for (const c of result.byClient) {
+      doc.text(
+        `  ${c.clientName} (${c.currency}) — Invoiced: ${c.totalInvoiced.toFixed(2)}  Paid: ${c.totalPaid.toFixed(2)}  Outstanding: ${c.totalOutstanding.toFixed(2)}`
+      );
+    }
+    doc.moveDown();
+
+    doc.fontSize(14).text('Invoices', { underline: true });
+    doc.fontSize(9);
+    for (const inv of result.invoices) {
+      doc.text(
+        `  #${inv.invoiceNumber} · ${inv.clientName} · ${inv.type} · ${inv.status} · ${inv.currency} ${inv.total.toFixed(2)}`
+      );
     }
 
     doc.end();

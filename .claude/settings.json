@@ -70,7 +70,10 @@
       "Bash(timeout 30 node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-jump-date-only.mjs\")",
       "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-revert-features.mjs\")",
       "Bash(grep -n \"scripts/\\\\|docker-compose.yml\\\\|^\\\\`\\\\`\\\\`\" \"c:/Users/ariel/OneDrive/Projects/Timesheets/README.md\")",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-invoice-report.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-invoice-report-ui-only.mjs\")",
+      "Bash(node \"C:/Users/ariel/AppData/Local/Temp/claude/c--Users-ariel-OneDrive-Projects-Timesheets/d8d1f2b6-5550-4fde-aaae-3403f43b5666/scratchpad/check-multicurrency-time-report.mjs\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\ariel\\OneDrive\\Projects\\Timesheets\\backend\\src\\models"

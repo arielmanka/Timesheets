@@ -112,7 +112,12 @@ const { loading: savingSettings, run: saveSettings } = useAsyncAction(async () =
 
 const budgetProgress = computed(() => {
   if (!project.value?.budget.type || !budgetActual.value || !project.value.budget.amount) return null
-  const actual = project.value.budget.type === 'hours' ? budgetActual.value.totalHours : budgetActual.value.totalCost
+  // Scoped to a single project, so at most one currency is expected — the
+  // budget amount is denominated in the project's own currency.
+  const actual =
+    project.value.budget.type === 'hours'
+      ? budgetActual.value.totalHours
+      : (budgetActual.value.costByCurrency[0]?.totalCost ?? 0)
   const pct = Math.min(100, Math.round((actual / project.value.budget.amount) * 100))
   return { actual, target: project.value.budget.amount, pct }
 })
