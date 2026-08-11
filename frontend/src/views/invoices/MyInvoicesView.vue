@@ -23,15 +23,34 @@ const projects = useProjectsStore()
 const auth = useAuthStore()
 const ui = useUiStore()
 
+// A project only belongs in the "new invoice" picker while it has approved,
+// billable, un-invoiced time left to bill — regardless of the project's own
+// status. Completing a project is often exactly when its last invoice gets
+// created, so this is never gated on status directly, only on whether
+// there's still something eligible to invoice.
+const eligibleProjectIds = ref<Set<string>>(new Set())
+
+async function refreshEligibleProjects(): Promise<void> {
+  const records = await timeRecordsService.listTimeRecords(teamId, {
+    userId: auth.user?._id,
+    billable: true,
+    invoiced: false,
+    status: 'approved',
+  })
+  eligibleProjectIds.value = new Set(records.map((r) => r.projectId))
+}
+
 const { loading, run: load } = useAsyncAction(async () => {
   await Promise.all([
     invoices.fetchAll(teamId, { createdBy: auth.user?._id }),
     projects.loaded ? Promise.resolve() : projects.fetchAll(teamId),
+    refreshEligibleProjects(),
   ])
 })
 onMounted(load)
 
 const myInvoices = computed(() => invoices.items.filter((i) => i.type === 'personal' && i.createdBy === auth.user?._id))
+const eligibleProjects = computed(() => projects.items.filter((p) => eligibleProjectIds.value.has(p._id)))
 
 function projectName(projectId: string | null): string {
   if (!projectId) return 'Unknown project'
@@ -121,6 +140,9 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
   })
   ui.success(`Invoice #${invoice.invoiceNumber} created as a draft.`)
   showWizard.value = false
+  // That project may now have nothing left to invoice — drop it from the
+  // picker immediately rather than waiting for a reload to notice.
+  await refreshEligibleProjects()
 })
 </script>
 
@@ -155,10 +177,15 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
 
     <Modal v-if="showWizard" title="New personal invoice" wide @close="showWizard = false">
       <div v-if="step === 1" class="space-y-4">
-        <FormField label="Project">
+        <EmptyState
+          v-if="eligibleProjects.length === 0"
+          title="Nothing to invoice right now"
+          message="No project has approved, billable, un-invoiced time on it — once one does, it'll show up here."
+        />
+        <FormField v-else label="Project">
           <select v-model="selectedProjectId" required class="field-control">
             <option value="" disabled>Select a project</option>
-            <option v-for="p in projects.items" :key="p._id" :value="p._id">{{ p.name }}</option>
+            <option v-for="p in eligibleProjects" :key="p._id" :value="p._id">{{ p.name }}</option>
           </select>
         </FormField>
       </div>
