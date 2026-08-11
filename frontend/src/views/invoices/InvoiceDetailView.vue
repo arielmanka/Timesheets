@@ -168,8 +168,10 @@ const { loading: saving, run: saveEdit } = useAsyncAction(async () => {
   invoice.value = await invoices.updateDraft(teamId, invoiceId, {
     notes: editNotes.value || null,
     manualItems: editManualItems.value.filter((m) => m.description.trim() !== ''),
+    // editTaxRate.value !== null, not a truthy check — 0% is a legitimate
+    // rate (e.g. an EU reverse-charge or exempt invoice) and must be kept.
     ...(isPersonal
-      ? { taxRules: editTaxName.value.trim() && editTaxRate.value ? [{ name: editTaxName.value.trim(), rate: editTaxRate.value }] : [] }
+      ? { taxRules: editTaxName.value.trim() && editTaxRate.value !== null ? [{ name: editTaxName.value.trim(), rate: editTaxRate.value }] : [] }
       : {}),
     dueDate: editDueDate.value || null,
     paymentTerms: editPaymentTerms.value || null,

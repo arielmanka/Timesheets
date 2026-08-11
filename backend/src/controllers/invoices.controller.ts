@@ -398,7 +398,19 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       );
     }
 
-    const csv = stringify([...header, ...rows], { header: true });
+    // Subtotal/tax(es)/total — every tax entry is listed unconditionally,
+    // including a 0% one (e.g. a reverse-charge or exempt invoice still
+    // needs the rate on record, not just silently no line at all).
+    const summaryRow = (label: string, amount: number) =>
+      isCollective ? { ...blankRow, Description: label, Gross: amount } : { ...blankRow, Description: label, Amount: amount };
+    const summaryRows = [
+      blankRow,
+      summaryRow('Subtotal', invoice.subtotal),
+      ...invoice.taxes.map((tax) => summaryRow(`${tax.name} (${tax.rate}%)`, tax.amount)),
+      summaryRow('Total', invoice.total),
+    ];
+
+    const csv = stringify([...header, ...rows, ...summaryRows], { header: true });
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoiceNumber}.csv"`);

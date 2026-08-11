@@ -112,7 +112,9 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
     timeRecordIds: Array.from(selectedRecordIds.value),
     notes: notes.value || null,
     manualItems: manualItems.value.filter((m) => m.description.trim() !== ''),
-    taxRules: taxName.value.trim() && taxRate.value ? [{ name: taxName.value.trim(), rate: taxRate.value }] : [],
+    // taxRate.value !== null, not a truthy check — 0% is a legitimate rate
+    // (e.g. an EU reverse-charge or exempt invoice) and must still be sent.
+    taxRules: taxName.value.trim() && taxRate.value !== null ? [{ name: taxName.value.trim(), rate: taxRate.value }] : [],
     dueDate: dueDate.value || null,
     paymentTerms: paymentTerms.value || null,
     taxNote: taxNote.value || null,
@@ -243,7 +245,7 @@ const { loading: creating, run: createInvoice } = useAsyncAction(async () => {
             <span>Subtotal</span>
             <span class="tabular-nums">{{ previewCurrency }} {{ subtotalPreview.toFixed(2) }}</span>
           </div>
-          <div v-if="taxRate" class="flex justify-between text-surface-600">
+          <div v-if="taxRate !== null" class="flex justify-between text-surface-600">
             <span>{{ taxName || 'Tax' }} ({{ taxRate }}%)</span>
             <span class="tabular-nums">{{ previewCurrency }} {{ taxPreview.toFixed(2) }}</span>
           </div>
