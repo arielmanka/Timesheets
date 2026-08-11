@@ -81,6 +81,9 @@ export async function createTimeRecord(
   if (!task) {
     throw AppError.notFound('Task not found on this project');
   }
+  if (task.status === 'complete') {
+    throw AppError.badRequest('Cannot log time against a completed task', 'TASK_COMPLETE');
+  }
 
   // Calculate duration (TR-7)
   const startTime = new Date(data.startTime);
@@ -185,6 +188,9 @@ export async function updateTimeRecord(
       const newTask = await Task.findOne({ _id: data.taskId, projectId: record.projectId });
       if (!newTask) {
         throw AppError.notFound('Task not found on this project');
+      }
+      if (newTask.status === 'complete') {
+        throw AppError.badRequest('Cannot reassign time to a completed task', 'TASK_COMPLETE');
       }
       changes.push({ field: 'taskId', previousValue: oldTaskId, newValue: data.taskId });
       if (newTask.billable !== record.billable) {

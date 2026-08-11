@@ -43,10 +43,13 @@ watch(
   }
 )
 
-// A task is required — its billable setting is what the logged time
-// inherits (see Task.billable), so there's nothing left to choose here.
-const selectedTask = computed(() => tasks.items.find((t) => t._id === form.taskId))
-const noTasksAvailable = computed(() => form.projectId !== '' && tasksLoaded.value && tasks.items.length === 0)
+// A completed task can't take new time (see timeRecord.service.ts's
+// TASK_COMPLETE check) — a task is required, and its billable setting is
+// what the logged time inherits (see Task.billable), so there's nothing
+// left to choose beyond which open/in-progress task this is for.
+const selectableTasks = computed(() => tasks.items.filter((t) => t.status !== 'complete'))
+const selectedTask = computed(() => selectableTasks.value.find((t) => t._id === form.taskId))
+const noTasksAvailable = computed(() => form.projectId !== '' && tasksLoaded.value && selectableTasks.value.length === 0)
 
 const { loading, run: submit } = useAsyncAction(async () => {
   await timeRecords.create(props.teamId, {
@@ -76,10 +79,10 @@ const { loading, run: submit } = useAsyncAction(async () => {
     <FormField label="Task" class="col-span-2">
       <select v-model="form.taskId" required class="field-control" :disabled="!form.projectId || noTasksAvailable">
         <option value="" disabled>Select a task</option>
-        <option v-for="t in tasks.items" :key="t._id" :value="t._id">{{ t.name }}</option>
+        <option v-for="t in selectableTasks" :key="t._id" :value="t._id">{{ t.name }}</option>
       </select>
       <p v-if="noTasksAvailable" class="mt-1 text-xs text-warning-600">
-        This project has no tasks yet — ask a manager to create one before logging time.
+        This project has no open tasks — ask a manager to create one, or reopen an existing one, before logging time.
       </p>
     </FormField>
 

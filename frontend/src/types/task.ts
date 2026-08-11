@@ -1,6 +1,6 @@
 import type { ID } from './common'
 
-export type TaskStatus = 'open' | 'in_progress' | 'done'
+export type TaskStatus = 'open' | 'in_progress' | 'complete'
 
 export interface Task {
   _id: ID
@@ -25,4 +25,4 @@ export interface TaskInput {
   billable?: boolean
 }
 
-export const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'done']
+export const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'complete']

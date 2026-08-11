@@ -19,7 +19,7 @@ const createTaskSchema = z.object({
 const updateTaskSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  status: z.enum(['open', 'in_progress', 'done']).optional(),
+  status: z.enum(['open', 'in_progress', 'complete']).optional(),
   assignedTo: z.string().nullable().optional(),
   hourlyRate: z.number().min(0).nullable().optional(),
   billable: z.boolean().optional(),
@@ -49,9 +49,9 @@ export async function create(req: Request, res: Response, next: NextFunction): P
 export async function list(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const status = req.query.status as string | undefined;
-    const validStatuses = ['open', 'in_progress', 'done'];
+    const validStatuses = ['open', 'in_progress', 'complete'];
     const statusFilter = status && validStatuses.includes(status)
-      ? status as 'open' | 'in_progress' | 'done'
+      ? status as 'open' | 'in_progress' | 'complete'
       : undefined;
     const tasks = await taskService.listTasks(req.params.projectId as string, statusFilter);
     res.json({ tasks });

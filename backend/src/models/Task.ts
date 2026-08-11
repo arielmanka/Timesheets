@@ -3,7 +3,7 @@ import mongoose, { Schema, type Document, type Model, type Types } from 'mongoos
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
-export type TaskStatus = 'open' | 'in_progress' | 'done';
+export type TaskStatus = 'open' | 'in_progress' | 'complete';
 
 export interface ITask extends Document {
   projectId: Types.ObjectId;
@@ -46,7 +46,7 @@ const taskSchema = new Schema<ITask>(
     },
     status: {
       type: String,
-      enum: ['open', 'in_progress', 'done'],
+      enum: ['open', 'in_progress', 'complete'],
       default: 'open',
     },
     assignedTo: {

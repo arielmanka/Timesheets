@@ -2,9 +2,9 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 8** — supersedes Revision 7
+**Revision 9** — supersedes Revision 8
 
-*Moves billability from the time record to the task: a task now carries a manager-only, server-enforced billable flag, and a time record inherits it as an immutable snapshot at creation rather than each entry being marked billable individually.*
+*Closes the enforcement gap where a task's status had no effect on time entry: a completed task's third status value is renamed from "done" to "complete" for consistency with project status naming (CPT-7), and the backend now rejects logging or reassigning time against a completed task, with the time-entry UI hiding completed tasks from selection to match.*
 
 ## Legend
 
@@ -12,6 +12,10 @@
 - **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
 - Unmarked items are unchanged from the prior revision.
+
+## Summary of Changes in Revision 9
+
+This revision fixes a reported bug: a task's status was purely a UI label with no backend effect, so a user could still log time against a task marked complete. **CPT-12** renames the third status value from "done" to "complete" (matching the naming already used for project status, CPT-7) and existing records were migrated. **CPT-15** is new: the backend now rejects creating a time record against a completed task, and rejects reassigning an existing time record's task to a completed one, both with a dedicated `TASK_COMPLETE` error code; the time-entry form's task dropdown filters out completed tasks so the option is never offered in the first place. This complements CPT-14's existing server-side enforcement — task status changes and assignment (CPT-12's "who may change it," CPT-13) remain UI-only restrictions; see [Known Implementation Gaps](#known-implementation-gaps). The user considered whether "open" and "in progress" were redundant statuses and decided to keep both as-is.
 
 ## Summary of Changes in Revision 8
 
@@ -53,9 +57,10 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **CPT-9** — The software must let the user with the manager role set a start and end date for a project.
 - **CPT-10** *(GAP)* — The software must let a manager optionally set an estimated-hours or monetary budget for a project, and must let a manager view recorded time or cost against that budget.
 - **CPT-11** — The backend software must calculate the total time recorded for a project.
-- **CPT-12** *(GAP)* — A task must have a status of open, in progress, or done. The status may be set by a manager or by the team member assigned to the task.
+- **CPT-12** *(REVISED, GAP)* — A task must have a status of open, in progress, or complete. The status may be set by a manager or by the team member assigned to the task.
 - **CPT-13** *(GAP)* — The software must let a manager assign a task to one member of the collaborative team.
 - **CPT-14** *(NEW)* — A task must have a billable flag (default: billable), settable only by a manager — enforced server-side, unlike CPT-12/CPT-13/RB-4's still-open gaps for a task's other fields (see Known Implementation Gaps). This is the single point of control for whether time logged against it can be invoiced (see TR-6, INV-1), rather than each team member deciding per entry.
+- **CPT-15** *(NEW)* — The software must not let a time record be created, or an existing time record's task reassigned, against a task whose status is complete — enforced server-side, distinct from CPT-12's still-open gap over who may change a task's status in the first place. The time-entry task-selection UI must not offer a completed task as an option.
 
 ## Rates and Billing
 
@@ -181,7 +186,7 @@ This revision documented two things. First, the invoicing enhancements built aft
 This section lists every requirement above marked **(GAP)**, with its practical impact, so open work stays visible to stakeholders rather than being silently assumed complete.
 
 - **CPT-10** — A project's budget-vs-actual view only totals cost in the first currency it encounters. If a project's currency is changed after time has already been logged against it, the budget progress display silently ignores cost recorded in the earlier currency.
-- **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team. (CPT-14's `billable` field is the one task field that *is* properly manager-enforced server-side — this gap covers everything else on a task.)
+- **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team. (CPT-14's `billable` field and, since Revision 9, the completed-task time-entry block described in CPT-15 are the task-related behaviors that *are* properly enforced server-side — this gap covers who is allowed to set a task's status or assignee in the first place, not what a completed status then does.)
 - **RB-4** — Setting a task's hourly rate has the same gap as CPT-12/13: the API does not restrict this to managers, though the UI does.
 - **RB-8, RB-9** — Hourly-rate redaction for non-managers is enforced only in the frontend (a UI component hides the value unless the viewer is a manager). The API itself returns each time record's full resolved rate regardless of the caller's role, so a regular user calling the API directly could read a rate they're not authorized to view.
 - **UA-9** — The team record does track its original creator, but authorization currently checks only the current manager role. If a creator is later demoted from manager by someone else, they lose the ability to remove members, revoke roles, or delete the team that the written requirement intends them to keep.
