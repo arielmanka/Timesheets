@@ -37,6 +37,9 @@ export async function createTask(
   if (!project) {
     throw AppError.notFound('Project not found in this team');
   }
+  if (project.status !== 'active') {
+    throw AppError.badRequest('Can only create tasks on active projects', 'PROJECT_NOT_ACTIVE');
+  }
 
   const task = new Task({
     projectId,

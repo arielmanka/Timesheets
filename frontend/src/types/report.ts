@@ -8,6 +8,7 @@ export interface ReportFilter {
   projectId?: string
   clientId?: string
   taskId?: string
+  status?: 'pending' | 'approved' | 'rejected'
 }
 
 export interface ReportSummary {

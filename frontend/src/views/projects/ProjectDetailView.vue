@@ -45,7 +45,9 @@ const { loading, run: load } = useAsyncAction(async () => {
   ])
   project.value = p
   if (team.isManager && p.budget.type) {
-    budgetActual.value = await reportsService.getReportSummary(teamId, { projectId })
+    // Budget "spent" reflects committed cost only — pending time could still
+    // be rejected, and rejected time never should have counted at all.
+    budgetActual.value = await reportsService.getReportSummary(teamId, { projectId, status: 'approved' })
   }
 })
 onMounted(load)
@@ -106,7 +108,9 @@ const { loading: savingSettings, run: saveSettings } = useAsyncAction(async () =
   showSettings.value = false
   ui.success('Project settings saved.')
   if (team.isManager && project.value.budget.type) {
-    budgetActual.value = await reportsService.getReportSummary(teamId, { projectId })
+    // Budget "spent" reflects committed cost only — pending time could still
+    // be rejected, and rejected time never should have counted at all.
+    budgetActual.value = await reportsService.getReportSummary(teamId, { projectId, status: 'approved' })
   }
 })
 
@@ -247,7 +251,7 @@ function assigneeName(userId: string | null): string {
     <div>
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-surface-800">Tasks</h2>
-        <AppButton v-if="team.isManager" variant="secondary" @click="openCreateTask">New task</AppButton>
+        <AppButton v-if="team.isManager && project.status === 'active'" variant="secondary" @click="openCreateTask">New task</AppButton>
       </div>
 
       <EmptyState v-if="tasks.items.length === 0" title="No tasks yet" />

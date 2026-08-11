@@ -1,4 +1,4 @@
-import { TimeRecord } from '../models/TimeRecord.js';
+import { TimeRecord, type TimeRecordStatus } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
 import { Task } from '../models/Task.js';
 import { Invoice, type InvoiceStatus, type InvoiceType } from '../models/Invoice.js';
@@ -15,6 +15,7 @@ export interface ReportFilter {
   projectId?: string;
   clientId?: string;
   taskId?: string;
+  status?: TimeRecordStatus;
 }
 
 export interface ReportSummary {
@@ -98,6 +99,7 @@ export async function getSummary(
   }
 
   if (filter.taskId) query.taskId = filter.taskId;
+  if (filter.status) query.status = filter.status;
 
   if (filter.startDate || filter.endDate) {
     query.date = {};

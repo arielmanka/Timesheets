@@ -31,6 +31,7 @@ export async function summary(req: Request, res: Response, next: NextFunction): 
     if (req.query.projectId) filter.projectId = req.query.projectId as string;
     if (req.query.clientId) filter.clientId = req.query.clientId as string;
     if (req.query.taskId) filter.taskId = req.query.taskId as string;
+    if (req.query.status) filter.status = req.query.status as reportService.ReportFilter['status'];
 
     const result = await reportService.getSummary(filter, isManager, authReq.user.userId);
     res.json(result);
@@ -56,6 +57,7 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
     if (req.query.projectId) filter.projectId = req.query.projectId as string;
     if (req.query.clientId) filter.clientId = req.query.clientId as string;
     if (req.query.taskId) filter.taskId = req.query.taskId as string;
+    if (req.query.status) filter.status = req.query.status as reportService.ReportFilter['status'];
 
     const rows = await reportService.getExportData(filter, isManager, authReq.user.userId);
 
@@ -85,6 +87,7 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     if (req.query.endDate) filter.endDate = new Date(req.query.endDate as string);
     if (req.query.userId) filter.userId = req.query.userId as string;
     if (req.query.projectId) filter.projectId = req.query.projectId as string;
+    if (req.query.status) filter.status = req.query.status as reportService.ReportFilter['status'];
 
     const result = await reportService.getSummary(filter, isManager, authReq.user.userId);
 
