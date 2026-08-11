@@ -2,20 +2,24 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 6** — supersedes Revision 5
+**Revision 7** — supersedes Revision 6
 
-*Reflects the invoicing bank-account and compliance enhancements built since Revision 5, and a full audit of every Revision 5 requirement against the current implementation.*
+*Adds a configurable, per-user notification and automation backbone (overdue invoices, missed weekly time entries, projects ending soon, approval backlogs), closing the automatic-overdue-transition gap noted against INV-16 along the way.*
 
 ## Legend
 
 - **(NEW)** — requirement added in this revision.
-- **(REVISED)** — requirement reworded from Revision 5, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
+- **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
-- Unmarked items are unchanged from Revision 5.
+- Unmarked items are unchanged from the prior revision.
 
-## Summary of Changes from Revision 5
+## Summary of Changes in Revision 7
 
-This revision documents two things. First, the invoicing enhancements built after Revision 5: separate personal and collective bank account details per user (supporting EU IBAN/SWIFT and North American routing/account formats, plus a free-text fallback), invoice due dates and payment terms, a free-text tax/legal note for reverse-charge and exemption mentions, an auto-derived supply/service period on personal invoices, and a phone number on a contractor's incorporation profile. Second, a full audit of every Revision 5 requirement against the deployed application. Several requirements have been reworded **(REVISED)** to match deliberate implementation decisions — for example, time-record overlap is enforced as a hard block rather than a warning, and MongoDB multi-document transactions were replaced with a two-phase write/reconcile pattern because the database runs as a standalone instance without a replica set. Others are marked **(GAP)** where the current implementation does not yet fully satisfy the written requirement; each is listed with its practical impact in [Known Implementation Gaps](#known-implementation-gaps) at the end of this document, so open work stays visible rather than silently assumed done.
+This revision adds the Notifications and Automation section (NOTIF-1 through NOTIF-6): a fixed catalog of rule types, evaluated on a recurring schedule, that notify a user in-app (and, if they opt in and the deployment has real email configured, by email) about things worth their attention — an overdue invoice, a quiet week with little logged time, a managed project approaching its end date, or an approval backlog. Each rule's own parameters and on/off state are configurable per user, and manager-scoped rules only appear for users who actually manage a team. Building the "invoice overdue" rule also closed a gap noted against **INV-16** in Revision 6: a sent invoice past its due date now transitions to overdue status automatically, rather than that status being reachable but never actually set by anything.
+
+## Summary of Changes in Revision 6
+
+This revision documented two things. First, the invoicing enhancements built after Revision 5: separate personal and collective bank account details per user (supporting EU IBAN/SWIFT and North American routing/account formats, plus a free-text fallback), invoice due dates and payment terms, a free-text tax/legal note for reverse-charge and exemption mentions, an auto-derived supply/service period on personal invoices, and a phone number on a contractor's incorporation profile. Second, a full audit of every Revision 5 requirement against the deployed application. Several requirements were reworded **(REVISED)** to match deliberate implementation decisions — for example, time-record overlap is enforced as a hard block rather than a warning, and MongoDB multi-document transactions were replaced with a two-phase write/reconcile pattern because the database runs as a standalone instance without a replica set. Others were marked **(GAP)** where the implementation did not yet fully satisfy the written requirement, each listed with its practical impact in [Known Implementation Gaps](#known-implementation-gaps) so open work stays visible rather than silently assumed done. (The RB-7 gap noted here was closed shortly after, still under this revision; Revision 7 has since also closed INV-16.)
 
 ---
 
@@ -78,7 +82,7 @@ This revision documents two things. First, the invoicing enhancements built afte
 - **INV-13** *(REVISED)* — The software must build a collective invoice exclusively from personal invoices that their owner has already created and sent — direct inclusion of un-invoiced time records by the manager, as specified in Revision 5, has been removed from product scope. Every contributor must issue and send their own personal invoice before their time can be consolidated into a collective invoice.
 - **INV-14** — The software must mark a time record as invoiced once it is included on any invoice, and must exclude invoiced time records from future invoice generation. If a draft invoice is deleted before transmission, its time records must be unmarked as invoiced.
 - **INV-15** *(REVISED)* — The software must assign each invoice a sequential invoice number, unique within its team, in the format `yyyymmdd-NNNNNN` (creation date plus a 6-digit, zero-padded, per-team sequence that never resets or reuses a number).
-- **INV-16** *(GAP)* — An invoice must have a status of draft, sent, paid, partially paid, or overdue, and must support recording a partial payment amount.
+- **INV-16** *(REVISED)* — An invoice must have a status of draft, sent, paid, partially paid, or overdue, and must support recording a partial payment amount. A sent invoice must transition to overdue automatically once its due date has passed, checked by the recurring scan described in NOTIF-2.
 - **INV-17** *(REVISED)* — The software must let the user choose one or more concurrent tax rules (name and rate) on a personal invoice, applied at creation or while it remains a draft. A collective invoice has no tax rate of its own — its total is the sum of each pooled personal invoice's own gross amount, with each retaining the tax rate its owner applied.
 - **INV-18** *(NEW)* — The software must let a user record two separate sets of bank account details on their profile: a personal account, used on personal invoices they create, and a collective account, used on collective invoices they issue as a manager on the team's behalf.
 - **INV-19** *(NEW)* — A bank account record must support both EU-style details (IBAN, SWIFT/BIC) and North American-style details (routing number, account number), plus a free-text field for any other routing scheme (sort code, IFSC, correspondent bank information, etc.). An account is considered complete only once it has an account holder name, bank name, country, and at least one of: an IBAN, a routing number plus account number, or free-text details.
@@ -97,6 +101,15 @@ This revision documents two things. First, the invoicing enhancements built afte
 - **RPT-5** — The software must let the user export the data to a PDF file.
 - **RPT-6** — Report and export data must be scoped by the access rules in Section 6: a regular user must see only their own data; a manager must see only the data of their collaborative team.
 - **RPT-7** *(NEW)* — The software must provide a separate invoice-focused report: invoice counts by status, and totals invoiced/paid/outstanding grouped by currency and broken down by client, with the same CSV/PDF export and access-rule scoping as RPT-4 through RPT-6.
+
+## Notifications and Automation
+
+- **NOTIF-1** *(NEW)* — The software must provide a configurable automation backbone: a fixed catalog of built-in rule types, each evaluated on a recurring schedule, that creates an in-app notification for a user when its condition is met for them.
+- **NOTIF-2** *(NEW)* — The rule catalog must include, at minimum: an invoice becoming overdue (notifying both the invoice's owner and any manager of its team, and transitioning the invoice's own status to overdue — see INV-16); a user not having logged enough time by a configurable point in the week; an active project, for its managers, approaching its configured end date; and time records that have sat pending approval longer than a configurable threshold, for the team's managers.
+- **NOTIF-3** *(NEW)* — The software must let each user independently enable or disable every rule type that applies to them, and tune that rule's own parameters (for example: grace days, which weekday, minimum hours, days-ahead threshold). A manager-scoped rule type must only be offered to a user who currently manages at least one team.
+- **NOTIF-4** *(NEW)* — The software must provide a dedicated Notifications page where a user can view their own notifications (read and unread), mark one or all as read, and — where the notification concerns a specific invoice or project — jump directly to it.
+- **NOTIF-5** *(NEW)* — The software must not create a duplicate notification for the same user and the same underlying occurrence within that rule's own re-notification window (for example: once per invoice, once per calendar week, once per day) — since the system does not send email by default, the in-app notification store is the definitive record of what's still open.
+- **NOTIF-6** *(NEW)* — If a user opts in to email delivery for a rule type, and the deployment's email provider is configured for real delivery (not the console/mock provider), the software must additionally send that notification by email, addressed to that user.
 
 ## User Access and Collaborative Teams
 
@@ -166,7 +179,6 @@ This section lists every requirement above marked **(GAP)**, with its practical 
 - **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team.
 - **RB-4** — Setting a task's hourly rate has the same gap as CPT-12/13: the API does not restrict this to managers, though the UI does.
 - **RB-8, RB-9** — Hourly-rate redaction for non-managers is enforced only in the frontend (a UI component hides the value unless the viewer is a manager). The API itself returns each time record's full resolved rate regardless of the caller's role, so a regular user calling the API directly could read a rate they're not authorized to view.
-- **INV-16** — The overdue status exists and can be reached, but nothing currently transitions a sent invoice to overdue automatically based on its due date (see INV-21); this would need to be a scheduled check.
 - **UA-9** — The team record does track its original creator, but authorization currently checks only the current manager role. If a creator is later demoted from manager by someone else, they lose the ability to remove members, revoke roles, or delete the team that the written requirement intends them to keep.
 - **UA-19** — Filing a deletion request only timestamps the account for manual review; there is no automated pipeline yet that actually erases account data, anonymizes invoiced time records, or otherwise acts on the request.
 - **TECH-7** — Revoking a refresh token on a role change is not implemented (logout-time revocation is). Impact is limited because role is looked up live from the database on every request rather than being embedded in the access token, but the written requirement is not literally met.

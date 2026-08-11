@@ -44,6 +44,12 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 - Immutable, per-team audit trail of team-member/project/task rate changes and time record approvals/reversions/rejections/invoice generation, each entry denormalized with actor and entity names at write time so it stays readable even if a project or user is later renamed or removed
 - A manager-only Audit Log page, filterable by event type, entity type, and date range — this system has no central administrator (every team is self-managed), so a team's own managers are the closest equivalent and the only ones who can view it
 
+**Notifications & automation**
+- A configurable, per-user automation backbone: a fixed catalog of rule types (not a general-purpose rule engine) evaluated on a recurring in-process scan, each independently enabled/disabled and tunable per user — no email integration is assumed, so every rule writes to an in-app inbox first
+- Built-in rules: an invoice becoming overdue (notifies the owner and any manager of its team, and flips the invoice's own status to overdue); a quiet week with too little logged time; a managed project approaching its configured end date; and an approval backlog once pending time records cross a manager's own threshold
+- Manager-scoped rules only appear in a user's settings once they actually manage a team; every rule dedupes its own re-notification window (once per invoice, once per calendar week, once per day, etc.) so a recurring scan never spams the same finding
+- A Notifications page (inbox: read/unread, mark-read, jump to the relevant invoice/project) plus an unread-count badge in the header; if a user opts into email for a rule and the deployment has real SMTP configured (`EMAIL_PROVIDER=smtp`), that notification is also emailed
+
 ## Architecture
 
 ```mermaid
@@ -142,6 +148,7 @@ All variables live in `.env` (see `.env.example` for the full template).
 | `EMAIL_PROVIDER` | `console` (logs tokens to stdout) or `smtp` |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | Required only when `EMAIL_PROVIDER=smtp` |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_LOGIN` / `RATE_LIMIT_MAX_REGISTER` | Rate limiting for auth endpoints |
+| `NOTIFICATION_SCAN_INTERVAL_MS` | How often the notification rule catalog re-scans (default `1800000` — 30 min) |
 | `LOG_LEVEL` | `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` |
 | `VITE_API_BASE_URL` | Frontend's API base path (default `/api/v1`) |
 
@@ -213,6 +220,7 @@ All routes are versioned under `/api/v1`. Team-scoped routes (`/teams/:teamId/..
 | Invoices | `/api/v1/teams/:teamId/invoices` | personal invoices by owner; collective invoices, pooling, and payments are manager-only; PDF/CSV export |
 | Reports | `/api/v1/teams/:teamId/reports` | team time/cost summaries, CSV/PDF export |
 | Audit log | `/api/v1/teams/:teamId/audit-log` | manager-only, filterable by event type / entity type / date range |
+| Notifications | `/api/v1/users/me/notifications`, `/api/v1/users/me/notification-preferences` | per-user inbox (list/mark read) and rule-type preferences — not team-scoped |
 
 ## Testing
 

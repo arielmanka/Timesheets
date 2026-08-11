@@ -26,6 +26,9 @@ const envSchema = z.object({
   RATE_LIMIT_MAX_LOGIN: z.coerce.number().default(20),
   RATE_LIMIT_MAX_REGISTER: z.coerce.number().default(5),
 
+  // Notification scheduler (NFR-6 automation backbone)
+  NOTIFICATION_SCAN_INTERVAL_MS: z.coerce.number().default(1_800_000), // 30 minutes
+
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 });

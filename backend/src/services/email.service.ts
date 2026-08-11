@@ -7,6 +7,7 @@ import { logger } from '../config/logger.js';
 interface EmailService {
   sendVerificationEmail(to: string, token: string): Promise<void>;
   sendPasswordResetEmail(to: string, token: string): Promise<void>;
+  sendNotificationEmail(to: string, subject: string, text: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,13 @@ class ConsoleEmailService implements EmailService {
         url,
       },
       `📧 [EMAIL MOCK] Password reset email for ${to} — Token: ${token} — URL: ${url}`
+    );
+  }
+
+  async sendNotificationEmail(to: string, subject: string, text: string): Promise<void> {
+    logger.info(
+      { emailProvider: 'console', type: 'notification', to, subject, text },
+      `📧 [EMAIL MOCK] Notification email for ${to} — Subject: ${subject}`
     );
   }
 }
@@ -103,6 +111,20 @@ class SmtpEmailService implements EmailService {
     });
 
     logger.info({ type: 'password_reset', to }, `Password reset email sent to ${to}`);
+  }
+
+  async sendNotificationEmail(to: string, subject: string, text: string): Promise<void> {
+    const transporter = await this.getTransporter();
+
+    await transporter.sendMail({
+      from: env.SMTP_FROM,
+      to,
+      subject,
+      text,
+      html: `<p>${text.replace(/\n/g, '<br>')}</p>`,
+    });
+
+    logger.info({ type: 'notification', to, subject }, `Notification email sent to ${to}`);
   }
 }
 

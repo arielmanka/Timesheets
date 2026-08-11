@@ -2,9 +2,11 @@
 import { ref, watchEffect } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import * as usersService from '../../services/users.service'
+import * as notificationsService from '../../services/notifications.service'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
 import type { BankAccountDetails, EmploymentType } from '../../types/user'
+import type { NotificationPreferenceEntry } from '../../types/notification'
 import FormField from '../../components/ui/FormField.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import ConfirmDialog from '../../components/ui/ConfirmDialog.vue'
@@ -90,6 +92,40 @@ const { loading: savingBankAccounts, run: saveBankAccounts } = useAsyncAction(as
   auth.setUser(updated)
   ui.success('Bank accounts updated.')
 })
+
+// --- Notification preferences (automation backbone) -----------------------
+const preferences = ref<NotificationPreferenceEntry[]>([])
+const emailAvailable = ref(false)
+const savingPreference = ref<string | null>(null)
+const WEEKDAY_LABELS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+const { loading: loadingPreferences, run: loadPreferences } = useAsyncAction(async () => {
+  const result = await notificationsService.getNotificationPreferences()
+  preferences.value = result.preferences
+  emailAvailable.value = result.emailAvailable
+})
+loadPreferences()
+
+async function togglePreference(pref: NotificationPreferenceEntry, field: 'enabled' | 'emailEnabled'): Promise<void> {
+  const next = !pref[field]
+  pref[field] = next
+  savingPreference.value = pref.ruleType
+  try {
+    await notificationsService.updateNotificationPreference(pref.ruleType, { [field]: next })
+  } finally {
+    savingPreference.value = null
+  }
+}
+
+async function updatePreferenceParam(pref: NotificationPreferenceEntry, key: string, value: number): Promise<void> {
+  pref.params = { ...pref.params, [key]: value }
+  savingPreference.value = pref.ruleType
+  try {
+    await notificationsService.updateNotificationPreference(pref.ruleType, { params: { [key]: value } })
+  } finally {
+    savingPreference.value = null
+  }
+}
 
 const showDeleteConfirm = ref(false)
 const deletionRequestedAt = ref<string | null>(null)
@@ -211,6 +247,120 @@ const { loading: deleting, run: requestDeletion } = useAsyncAction(async () => {
 
       <AppButton type="submit" :loading="savingBankAccounts">Save changes</AppButton>
     </form>
+
+    <div class="space-y-4 rounded-lg border border-surface-200 bg-white p-5">
+      <div>
+        <h2 class="text-sm font-semibold text-surface-800">Notification preferences</h2>
+        <p class="mt-1 text-xs text-surface-500">
+          Rules this app watches on your behalf — overdue invoices, missed weekly time entries, projects ending
+          soon, and approval backlogs. Manager-scoped rules only appear here if you manage at least one team.
+          Changes save automatically.
+        </p>
+        <p v-if="!emailAvailable" class="mt-2 rounded-md bg-surface-100 px-2.5 py-1.5 text-xs text-surface-500">
+          Email delivery isn't configured on this server (EMAIL_PROVIDER=console) — "also email me" will still be
+          logged server-side but won't send a real email until SMTP is set up.
+        </p>
+      </div>
+
+      <p v-if="loadingPreferences" class="text-sm text-surface-500">Loading…</p>
+      <ul v-else class="space-y-3">
+        <li v-for="pref in preferences" :key="pref.ruleType" class="rounded-md border border-surface-200 p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-sm font-medium text-surface-800">{{ pref.label }}</div>
+              <p class="mt-0.5 text-xs text-surface-500">{{ pref.description }}</p>
+            </div>
+            <label class="flex shrink-0 items-center gap-1.5 text-xs text-surface-600">
+              <input
+                type="checkbox"
+                :checked="pref.enabled"
+                class="h-4 w-4 rounded border-surface-300"
+                @change="togglePreference(pref, 'enabled')"
+              />
+              Enabled
+            </label>
+          </div>
+
+          <template v-if="pref.enabled">
+            <label class="mt-2 flex items-center gap-1.5 text-xs text-surface-600">
+              <input
+                type="checkbox"
+                :checked="pref.emailEnabled"
+                class="h-4 w-4 rounded border-surface-300"
+                @change="togglePreference(pref, 'emailEnabled')"
+              />
+              Also email me
+            </label>
+
+            <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-surface-600">
+              <template v-if="pref.ruleType === 'invoice_overdue'">
+                <label class="flex items-center gap-1.5">
+                  Grace period
+                  <input
+                    type="number"
+                    min="0"
+                    class="field-control w-16 py-1"
+                    :value="pref.params.graceDays"
+                    @change="updatePreferenceParam(pref, 'graceDays', Number(($event.target as HTMLInputElement).value))"
+                  />
+                  days
+                </label>
+              </template>
+              <template v-else-if="pref.ruleType === 'missed_weekly_time_entry'">
+                <label class="flex items-center gap-1.5">
+                  Remind me from
+                  <select
+                    class="field-control w-32 py-1"
+                    :value="pref.params.weekday"
+                    @change="updatePreferenceParam(pref, 'weekday', Number(($event.target as HTMLSelectElement).value))"
+                  >
+                    <option v-for="(day, i) in WEEKDAY_LABELS" :key="day" :value="i + 1">{{ day }}</option>
+                  </select>
+                </label>
+                <label class="flex items-center gap-1.5">
+                  if under
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    class="field-control w-16 py-1"
+                    :value="pref.params.minHours"
+                    @change="updatePreferenceParam(pref, 'minHours', Number(($event.target as HTMLInputElement).value))"
+                  />
+                  hours logged that week
+                </label>
+              </template>
+              <template v-else-if="pref.ruleType === 'project_ending_soon'">
+                <label class="flex items-center gap-1.5">
+                  Notify
+                  <input
+                    type="number"
+                    min="1"
+                    class="field-control w-16 py-1"
+                    :value="pref.params.daysAhead"
+                    @change="updatePreferenceParam(pref, 'daysAhead', Number(($event.target as HTMLInputElement).value))"
+                  />
+                  days before the end date
+                </label>
+              </template>
+              <template v-else-if="pref.ruleType === 'pending_approval_backlog'">
+                <label class="flex items-center gap-1.5">
+                  Notify once pending
+                  <input
+                    type="number"
+                    min="1"
+                    class="field-control w-16 py-1"
+                    :value="pref.params.thresholdDays"
+                    @change="updatePreferenceParam(pref, 'thresholdDays', Number(($event.target as HTMLInputElement).value))"
+                  />
+                  days or more
+                </label>
+              </template>
+            </div>
+          </template>
+        </li>
+      </ul>
+    </div>
 
     <div class="rounded-lg border border-danger-600/20 bg-white p-5">
       <h2 class="text-sm font-semibold text-surface-800">Delete account</h2>

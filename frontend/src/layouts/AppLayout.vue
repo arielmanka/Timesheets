@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useTeamStore } from '../stores/team'
+import { useNotificationsStore } from '../stores/notifications'
 import ToastStack from '../components/ui/ToastStack.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const team = useTeamStore()
+const notifications = useNotificationsStore()
 
 const teamId = computed(() => route.params.teamId as string | undefined)
 const userMenuOpen = ref(false)
+
+// Polls rather than pushing — this app has no websocket/SSE channel, and a
+// notification only needs to feel "reasonably fresh," not instant.
+let pollHandle: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  if (!auth.isAuthenticated) return
+  notifications.refreshUnreadCount()
+  pollHandle = setInterval(() => {
+    if (auth.isAuthenticated) notifications.refreshUnreadCount()
+  }, 60_000)
+})
+onBeforeUnmount(() => {
+  if (pollHandle) clearInterval(pollHandle)
+})
 
 const navLinks = computed(() => {
   if (!teamId.value) return []
@@ -32,6 +48,7 @@ const navLinks = computed(() => {
 async function handleLogout(): Promise<void> {
   await auth.logout()
   team.reset()
+  notifications.reset()
   router.push({ name: 'login' })
 }
 </script>
@@ -65,6 +82,22 @@ async function handleLogout(): Promise<void> {
           </router-link>
         </nav>
         <div v-else class="flex-1" />
+
+        <router-link
+          to="/notifications"
+          class="relative shrink-0 rounded-md p-1.5 text-surface-500 hover:bg-surface-100 hover:text-surface-800"
+          title="Notifications"
+        >
+          <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15h14a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM8.5 17a1.5 1.5 0 003 0h-3z" />
+          </svg>
+          <span
+            v-if="notifications.unreadCount > 0"
+            class="absolute -right-0.5 -top-0.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-danger-600 px-1 text-[10px] font-semibold leading-none text-white"
+          >
+            {{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}
+          </span>
+        </router-link>
 
         <div class="relative shrink-0">
           <button

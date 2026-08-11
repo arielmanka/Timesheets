@@ -8,6 +8,8 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { v1Router } from './routes/v1/index.js';
 import { reconcile } from './services/invoice.service.js';
+import { runAllRules } from './services/notificationRules.service.js';
+import { startNotificationScheduler } from './services/scheduler.service.js';
 
 const app = express();
 
@@ -49,6 +51,16 @@ app.post('/internal/reconcile', async (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Internal manual-trigger endpoint for the notification scheduler (not
+// exposed via Nginx) — lets an operator (or a test) force an immediate scan
+// instead of waiting for the next interval tick.
+// ---------------------------------------------------------------------------
+app.post('/internal/evaluate-notifications', async (_req, res) => {
+  await runAllRules();
+  res.json({ message: 'Notification rules evaluated' });
+});
+
+// ---------------------------------------------------------------------------
 // Global error handler
 // ---------------------------------------------------------------------------
 app.use(errorHandler);
@@ -69,6 +81,8 @@ async function start(): Promise<void> {
     } catch (err) {
       logger.warn({ err }, 'Startup reconciliation failed (non-fatal)');
     }
+
+    startNotificationScheduler();
 
     app.listen(env.PORT, () => {
       logger.info(

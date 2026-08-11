@@ -57,6 +57,12 @@ export const router = createRouter({
       component: () => import('../views/account/AccountView.vue'),
       meta: { requiresAuth: true, layout: 'app' },
     },
+    {
+      path: '/notifications',
+      name: 'notifications',
+      component: () => import('../views/notifications/NotificationsView.vue'),
+      meta: { requiresAuth: true, layout: 'app' },
+    },
 
     // --- Team switcher --------------------------------------------------------
     {

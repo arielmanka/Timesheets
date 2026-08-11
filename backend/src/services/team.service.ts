@@ -318,3 +318,22 @@ function assertManager(team: ITeam, actorId: string): void {
     throw AppError.forbidden('Only team managers can perform this action');
   }
 }
+
+/**
+ * All manager userIds for a team — e.g. to resolve who should receive a
+ * manager-scoped notification about something happening on that team.
+ */
+export async function getTeamManagerIds(teamId: string): Promise<string[]> {
+  const team = await Team.findById(teamId);
+  if (!team) return [];
+  return team.members.filter((m) => m.role === 'manager').map((m) => m.userId.toString());
+}
+
+/**
+ * Whether a user manages at least one team — used to decide whether
+ * manager-scoped notification rules should even appear in their settings.
+ */
+export async function isManagerOfAnyTeam(userId: string): Promise<boolean> {
+  const count = await Team.countDocuments({ members: { $elemMatch: { userId, role: 'manager' } } });
+  return count > 0;
+}
