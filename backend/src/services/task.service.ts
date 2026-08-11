@@ -12,6 +12,7 @@ export interface CreateTaskData {
   description?: string | null;
   assignedTo?: string | null;
   hourlyRate?: number | null;
+  billable?: boolean;
 }
 
 export interface UpdateTaskData {
@@ -20,6 +21,7 @@ export interface UpdateTaskData {
   status?: TaskStatus;
   assignedTo?: string | null;
   hourlyRate?: number | null;
+  billable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,7 @@ export async function createTask(
     description: data.description ?? null,
     assignedTo: data.assignedTo ?? null,
     hourlyRate: data.hourlyRate ?? null,
+    billable: data.billable ?? true,
   });
 
   await task.save();
@@ -74,26 +77,38 @@ export async function getTaskById(taskId: string, projectId: string): Promise<IT
 
 // ---------------------------------------------------------------------------
 // Update (CPT-12, RB-4)
+// `billable` governs whether time logged against this task can be invoiced
+// (see TimeRecord), so — unlike status, which the assigned member may also
+// set — only a manager may change it, enforced here rather than at the
+// route level so CPT-12's "assigned member can set status" capability isn't
+// lost by gating the whole endpoint to managers.
 // ---------------------------------------------------------------------------
 export async function updateTask(
   taskId: string,
   projectId: string,
   data: UpdateTaskData,
   teamId: string,
-  actorId: string
+  actorId: string,
+  isManager: boolean
 ): Promise<ITask> {
   const task = await Task.findOne({ _id: taskId, projectId });
   if (!task) {
     throw AppError.notFound('Task not found');
   }
 
+  if (data.billable !== undefined && !isManager) {
+    throw AppError.forbidden('Only a manager can change whether a task is billable');
+  }
+
   const previousRate = task.hourlyRate;
+  const previousBillable = task.billable;
 
   if (data.name !== undefined) task.name = data.name;
   if (data.description !== undefined) task.description = data.description;
   if (data.status !== undefined) task.status = data.status;
   if (data.assignedTo !== undefined) task.assignedTo = data.assignedTo as any;
   if (data.hourlyRate !== undefined) task.hourlyRate = data.hourlyRate;
+  if (data.billable !== undefined) task.billable = data.billable;
 
   await task.save();
 
@@ -105,6 +120,17 @@ export async function updateTask(
       projectName: project?.name ?? 'Unknown project',
       previousRate,
       newRate: data.hourlyRate,
+    });
+  }
+
+  if (data.billable !== undefined && data.billable !== previousBillable) {
+    const project = await Project.findById(projectId);
+    await auditService.log('task_billable_changed', 'Task', taskId, teamId, actorId, {
+      taskName: task.name,
+      projectId,
+      projectName: project?.name ?? 'Unknown project',
+      previousBillable,
+      newBillable: data.billable,
     });
   }
 

@@ -13,20 +13,22 @@ import { AppError } from '../utils/errors.js';
 // ---------------------------------------------------------------------------
 export interface CreateTimeRecordData {
   projectId: string;
-  taskId?: string | null;
+  taskId: string;
   date: Date;
   startTime: Date;
   endTime: Date;
-  billable?: boolean;
   note?: string;
 }
 
 export interface UpdateTimeRecordData {
   startTime?: Date;
   endTime?: Date;
-  billable?: boolean;
   note?: string;
-  taskId?: string | null;
+  // A task may be reassigned (re-deriving billable from the new task), but
+  // cannot be cleared — task selection is mandatory going forward. Existing
+  // records logged before this rule (task-less) are left as they are unless
+  // this is explicitly set.
+  taskId?: string;
 }
 
 export interface OverlapCheckResult {
@@ -69,6 +71,17 @@ export async function createTimeRecord(
     );
   }
 
+  // A task governs whether the time logged against it is billable, so
+  // selecting one is mandatory — this is the manager's point of control
+  // (see Task.billable) rather than each entry deciding for itself.
+  if (!data.taskId) {
+    throw AppError.badRequest('A task is required to log time', 'TASK_REQUIRED');
+  }
+  const task = await Task.findOne({ _id: data.taskId, projectId: data.projectId });
+  if (!task) {
+    throw AppError.notFound('Task not found on this project');
+  }
+
   // Calculate duration (TR-7)
   const startTime = new Date(data.startTime);
   const endTime = new Date(data.endTime);
@@ -92,7 +105,7 @@ export async function createTimeRecord(
   // Resolve rate (RB-5) and calculate cost (RB-6)
   const resolved = await resolveRate(
     data.projectId,
-    data.taskId ?? null,
+    data.taskId,
     userId,
     teamId
   );
@@ -102,12 +115,15 @@ export async function createTimeRecord(
   const record = new TimeRecord({
     userId,
     projectId: data.projectId,
-    taskId: data.taskId ?? null,
+    taskId: data.taskId,
     date: data.date,
     startTime,
     endTime,
     durationMinutes,
-    billable: data.billable ?? true,
+    // Copied from the task at creation, not user-set — a snapshot, same as
+    // resolvedRate/currency (RB-6/RB-10), so a later change to the task's
+    // billable setting never silently alters an already-logged entry.
+    billable: task.billable,
     note: data.note ?? '',
     resolvedRate: resolved.rate,
     rateSource: resolved.source,
@@ -157,20 +173,25 @@ export async function updateTimeRecord(
     changes.push({ field: 'endTime', previousValue: record.endTime, newValue: data.endTime });
     record.endTime = new Date(data.endTime);
   }
-  if (data.billable !== undefined && data.billable !== record.billable) {
-    changes.push({ field: 'billable', previousValue: record.billable, newValue: data.billable });
-    record.billable = data.billable;
-  }
   if (data.note !== undefined && data.note !== record.note) {
     changes.push({ field: 'note', previousValue: record.note, newValue: data.note });
     record.note = data.note;
   }
+  // Reassigning the task re-derives billable from the new task — billable
+  // is never set directly by the user, only ever inherited (see create).
   if (data.taskId !== undefined) {
     const oldTaskId = record.taskId?.toString() ?? null;
-    const newTaskId = data.taskId ?? null;
-    if (oldTaskId !== newTaskId) {
-      changes.push({ field: 'taskId', previousValue: oldTaskId, newValue: newTaskId });
-      record.taskId = newTaskId as any;
+    if (oldTaskId !== data.taskId) {
+      const newTask = await Task.findOne({ _id: data.taskId, projectId: record.projectId });
+      if (!newTask) {
+        throw AppError.notFound('Task not found on this project');
+      }
+      changes.push({ field: 'taskId', previousValue: oldTaskId, newValue: data.taskId });
+      if (newTask.billable !== record.billable) {
+        changes.push({ field: 'billable', previousValue: record.billable, newValue: newTask.billable });
+        record.billable = newTask.billable;
+      }
+      record.taskId = data.taskId as any;
     }
   }
 

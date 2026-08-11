@@ -125,16 +125,17 @@ const budgetProgress = computed(() => {
 // --- Tasks -------------------------------------------------------------
 const showTaskForm = ref(false)
 const editingTask = ref<Task | null>(null)
-const taskForm = reactive<{ name: string; description: string; assignedTo: string | null; hourlyRate: string }>({
+const taskForm = reactive<{ name: string; description: string; assignedTo: string | null; hourlyRate: string; billable: boolean }>({
   name: '',
   description: '',
   assignedTo: null,
   hourlyRate: '',
+  billable: true,
 })
 
 function openCreateTask(): void {
   editingTask.value = null
-  Object.assign(taskForm, { name: '', description: '', assignedTo: null, hourlyRate: '' })
+  Object.assign(taskForm, { name: '', description: '', assignedTo: null, hourlyRate: '', billable: true })
   showTaskForm.value = true
 }
 function openEditTask(task: Task): void {
@@ -144,6 +145,7 @@ function openEditTask(task: Task): void {
     description: task.description ?? '',
     assignedTo: task.assignedTo,
     hourlyRate: task.hourlyRate === null ? '' : String(task.hourlyRate),
+    billable: task.billable,
   })
   showTaskForm.value = true
 }
@@ -153,6 +155,7 @@ const { loading: savingTask, run: saveTask } = useAsyncAction(async () => {
     description: taskForm.description || null,
     assignedTo: taskForm.assignedTo || null,
     hourlyRate: taskForm.hourlyRate === '' ? null : Number(taskForm.hourlyRate),
+    billable: taskForm.billable,
   }
   if (editingTask.value) {
     await tasks.update(teamId, projectId, editingTask.value._id, input)
@@ -256,7 +259,15 @@ function assigneeName(userId: string | null): string {
           class="flex items-center justify-between rounded-lg border border-surface-200 bg-white px-4 py-2.5"
         >
           <div class="min-w-0">
-            <div class="truncate font-medium text-surface-900">{{ task.name }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="truncate font-medium text-surface-900">{{ task.name }}</span>
+              <span
+                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                :class="task.billable ? 'bg-primary-500/10 text-primary-700' : 'bg-surface-100 text-surface-500'"
+              >
+                {{ task.billable ? 'Billable' : 'Non-billable' }}
+              </span>
+            </div>
             <div class="text-xs text-surface-500">{{ assigneeName(task.assignedTo) }}</div>
           </div>
           <div class="flex shrink-0 items-center gap-2">
@@ -344,6 +355,12 @@ function assigneeName(userId: string | null): string {
         </FormField>
         <FormField label="Hourly rate" hint="Overrides the project and member rate for time logged on this task.">
           <input v-model="taskForm.hourlyRate" type="number" step="0.01" min="0" class="field-control" />
+        </FormField>
+        <FormField label="Billable" hint="Every time entry logged against this task inherits this setting — it can't be overridden per entry.">
+          <label class="flex h-[38px] items-center gap-2 text-sm text-surface-700">
+            <input v-model="taskForm.billable" type="checkbox" class="h-4 w-4 rounded border-surface-300" />
+            Billable
+          </label>
         </FormField>
       </form>
       <template #footer>

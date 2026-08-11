@@ -12,10 +12,10 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 **Clients, projects & tasks**
 - Clients with billing details and tax ID, scoped per team
 - Projects with status (active/on hold/complete/cancelled), currency, optional date range, hourly rate, and budget tracking (hours or monetary)
-- Tasks per project with their own optional rate override and assignee
+- Tasks per project with their own optional rate override, assignee, and a manager-only, server-enforced billable flag (default: billable) — the single point of control for whether time logged against it can be invoiced
 
 **Time tracking**
-- Weekly grid entry with project/task selection, notes, and billable flag
+- Weekly grid entry with mandatory project + task selection and notes — a time record's billable status is never set directly; it's inherited from its task as an immutable snapshot at creation (same pattern as its resolved rate/currency), so a manager always controls what's billable rather than each entry deciding for itself
 - Hard overlap prevention — a user can't log two overlapping entries on the same day, even across different teams
 - Entries can't be logged outside a project's active date range
 - Rate resolution with clear precedence: task rate → project rate → team-member rate

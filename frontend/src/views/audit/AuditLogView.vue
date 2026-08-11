@@ -26,6 +26,7 @@ const EVENT_TYPES = [
   { value: 'member_rate_changed', label: 'Member rate changed' },
   { value: 'project_rate_changed', label: 'Project rate changed' },
   { value: 'task_rate_changed', label: 'Task rate changed' },
+  { value: 'task_billable_changed', label: 'Task billable changed' },
 ]
 const ENTITY_TYPES = ['', 'Invoice', 'TimeRecord', 'TeamMember', 'Project', 'Task']
 
@@ -153,6 +154,10 @@ function rateChangeLabel(d: Record<string, unknown>): string {
                 </template>
                 <template v-else-if="entry.eventType === 'task_rate_changed'">
                   {{ entry.details.taskName }} ({{ entry.details.projectName }}): {{ rateChangeLabel(entry.details) }}
+                </template>
+                <template v-else-if="entry.eventType === 'task_billable_changed'">
+                  {{ entry.details.taskName }} ({{ entry.details.projectName }}): {{ entry.details.previousBillable ? 'Billable' : 'Non-billable' }} →
+                  {{ entry.details.newBillable ? 'Billable' : 'Non-billable' }}
                 </template>
                 <template v-else>{{ JSON.stringify(entry.details) }}</template>
               </td>

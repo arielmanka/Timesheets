@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
 import { useProjectsStore } from '../../stores/projects'
 import { useTasksStore } from '../../stores/tasks'
@@ -25,29 +25,38 @@ const form = reactive({
   date: todayLocalDate(),
   startTime: '09:00',
   endTime: '17:00',
-  billable: true,
   note: '',
 })
+
+const tasksLoaded = ref(false)
 
 // Reload the task list whenever the selected project changes.
 watch(
   () => form.projectId,
   async (projectId) => {
     form.taskId = ''
-    if (projectId) await tasks.fetchAll(props.teamId, projectId)
+    tasksLoaded.value = false
+    if (projectId) {
+      await tasks.fetchAll(props.teamId, projectId)
+      tasksLoaded.value = true
+    }
   }
 )
+
+// A task is required — its billable setting is what the logged time
+// inherits (see Task.billable), so there's nothing left to choose here.
+const selectedTask = computed(() => tasks.items.find((t) => t._id === form.taskId))
+const noTasksAvailable = computed(() => form.projectId !== '' && tasksLoaded.value && tasks.items.length === 0)
 
 const { loading, run: submit } = useAsyncAction(async () => {
   await timeRecords.create(props.teamId, {
     projectId: form.projectId,
-    taskId: form.taskId || null,
+    taskId: form.taskId,
     // Plain yyyy-MM-dd — the backend parses date-only strings as UTC midnight,
     // so this round-trips to the same calendar date regardless of timezone.
     date: form.date,
     startTime: combineLocalDateTime(form.date, form.startTime),
     endTime: combineLocalDateTime(form.date, form.endTime),
-    billable: form.billable,
     note: form.note || undefined,
   })
 
@@ -65,10 +74,13 @@ const { loading, run: submit } = useAsyncAction(async () => {
       </select>
     </FormField>
     <FormField label="Task" class="col-span-2">
-      <select v-model="form.taskId" class="field-control" :disabled="!form.projectId">
-        <option value="">No task</option>
+      <select v-model="form.taskId" required class="field-control" :disabled="!form.projectId || noTasksAvailable">
+        <option value="" disabled>Select a task</option>
         <option v-for="t in tasks.items" :key="t._id" :value="t._id">{{ t.name }}</option>
       </select>
+      <p v-if="noTasksAvailable" class="mt-1 text-xs text-warning-600">
+        This project has no tasks yet — ask a manager to create one before logging time.
+      </p>
     </FormField>
 
     <FormField label="Date">
@@ -87,11 +99,17 @@ const { loading, run: submit } = useAsyncAction(async () => {
     <FormField label="End">
       <VueDatePicker v-model="form.endTime" model-type="HH:mm" time-picker :clearable="false" auto-apply />
     </FormField>
-    <FormField label="Billable">
-      <label class="flex h-[38px] items-center gap-2 text-sm text-surface-700">
-        <input v-model="form.billable" type="checkbox" class="h-4 w-4 rounded border-surface-300" />
-        Billable
-      </label>
+    <FormField label="Billable" hint="Set on the task — see your manager to change it.">
+      <div class="flex h-[38px] items-center">
+        <span
+          v-if="selectedTask"
+          class="rounded px-2 py-1 text-xs font-medium uppercase tracking-wide"
+          :class="selectedTask.billable ? 'bg-primary-500/10 text-primary-700' : 'bg-surface-100 text-surface-500'"
+        >
+          {{ selectedTask.billable ? 'Billable' : 'Non-billable' }}
+        </span>
+        <span v-else class="text-sm text-surface-400">Select a task</span>
+      </div>
     </FormField>
 
     <FormField label="Note" class="col-span-2 sm:col-span-4">
@@ -99,7 +117,7 @@ const { loading, run: submit } = useAsyncAction(async () => {
     </FormField>
 
     <div class="col-span-2 sm:col-span-4">
-      <AppButton type="submit" :loading="loading" :disabled="!form.projectId">Log time</AppButton>
+      <AppButton type="submit" :loading="loading" :disabled="!form.projectId || !form.taskId">Log time</AppButton>
     </div>
   </form>
 </template>

@@ -10,20 +10,22 @@ import { AppError } from '../utils/errors.js';
 // ---------------------------------------------------------------------------
 const createTimeRecordSchema = z.object({
   projectId: z.string().min(1, 'Project ID is required'),
-  taskId: z.string().nullable().optional(),
+  // A task governs whether the logged time is billable, so selecting one is
+  // mandatory — see Task.billable.
+  taskId: z.string().min(1, 'A task is required'),
   date: z.coerce.date(),
   startTime: z.coerce.date(),
   endTime: z.coerce.date(),
-  billable: z.boolean().optional(),
   note: z.string().max(1000).optional(),
 });
 
 const updateTimeRecordSchema = z.object({
   startTime: z.coerce.date().optional(),
   endTime: z.coerce.date().optional(),
-  billable: z.boolean().optional(),
   note: z.string().max(1000).optional(),
-  taskId: z.string().nullable().optional(),
+  // Reassigns the task (and re-derives billable from it) — cannot be
+  // cleared to null; task-less records predate this rule and are grandfathered as-is.
+  taskId: z.string().min(1).optional(),
 });
 
 const rejectSchema = z.object({

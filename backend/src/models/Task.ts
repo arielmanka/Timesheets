@@ -12,6 +12,11 @@ export interface ITask extends Document {
   status: TaskStatus;
   assignedTo: Types.ObjectId | null;
   hourlyRate: number | null;
+  // Task selection on a time record is mandatory (see TimeRecord), and a
+  // record's own billable flag is copied from its task at creation time —
+  // this is the single place a manager controls what's billable, rather
+  // than each team member deciding per entry.
+  billable: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,6 +58,10 @@ const taskSchema = new Schema<ITask>(
       type: Number,
       default: null,
       min: 0,
+    },
+    billable: {
+      type: Boolean,
+      default: true,
     },
   },
   {

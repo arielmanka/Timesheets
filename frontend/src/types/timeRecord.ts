@@ -20,6 +20,7 @@ export interface TimeRecord {
   startTime: string
   endTime: string
   durationMinutes: number
+  /** Inherited from the task at creation time — never set directly; see Task.billable. */
   billable: boolean
   note: string
   /** Manager/owner-sensitive — see RateField; never render for a viewer who isn't the record owner or a manager. */
@@ -41,20 +42,20 @@ export interface TimeRecord {
 
 export interface TimeRecordInput {
   projectId: string
-  taskId?: string | null
+  /** Required — governs billable via the task; see Task.billable. */
+  taskId: string
   date: string
   startTime: string
   endTime: string
-  billable?: boolean
   note?: string
 }
 
 export interface TimeRecordUpdateInput {
   startTime?: string
   endTime?: string
-  billable?: boolean
   note?: string
-  taskId?: string | null
+  /** Reassigns the task (re-deriving billable) — cannot be cleared. */
+  taskId?: string
 }
 
 export interface ListTimeRecordsFilter {

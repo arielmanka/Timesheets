@@ -147,7 +147,7 @@ const weekTotalHours = computed(() => {
 
 // --- Inline edit ---------------------------------------------------------
 const editing = ref<TimeRecord | null>(null)
-const editForm = reactive({ startTime: '', endTime: '', billable: true, note: '' })
+const editForm = reactive({ startTime: '', endTime: '', note: '' })
 
 function openEdit(record: TimeRecord): void {
   if (record.locked) return
@@ -155,7 +155,6 @@ function openEdit(record: TimeRecord): void {
   Object.assign(editForm, {
     startTime: formatTimeOfDay(record.startTime),
     endTime: formatTimeOfDay(record.endTime),
-    billable: record.billable,
     note: record.note,
   })
 }
@@ -166,7 +165,6 @@ const { loading: savingEdit, run: saveEdit } = useAsyncAction(async () => {
   await timeRecords.update(teamId, editing.value._id, {
     startTime: combineLocalDateTime(day, editForm.startTime),
     endTime: combineLocalDateTime(day, editForm.endTime),
-    billable: editForm.billable,
     note: editForm.note,
   })
   ui.success('Time record updated.')
@@ -341,11 +339,13 @@ const { loading: deleting, run: confirmDelete } = useAsyncAction(async () => {
             <VueDatePicker v-model="editForm.endTime" model-type="HH:mm" time-picker :clearable="false" auto-apply />
           </FormField>
         </div>
-        <FormField label="Billable">
-          <label class="flex items-center gap-2 text-sm text-surface-700">
-            <input v-model="editForm.billable" type="checkbox" class="h-4 w-4 rounded border-surface-300" />
-            Billable
-          </label>
+        <FormField label="Billable" hint="Set on the task — see your manager to change it.">
+          <span
+            class="inline-block rounded px-2 py-1 text-xs font-medium uppercase tracking-wide"
+            :class="editing?.billable ? 'bg-primary-500/10 text-primary-700' : 'bg-surface-100 text-surface-500'"
+          >
+            {{ editing?.billable ? 'Billable' : 'Non-billable' }}
+          </span>
         </FormField>
         <FormField label="Note">
           <textarea v-model="editForm.note" maxlength="1000" rows="2" class="field-control" />

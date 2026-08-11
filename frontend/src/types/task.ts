@@ -11,6 +11,8 @@ export interface Task {
   assignedTo: ID | null
   /** Manager-only field — see RateField. */
   hourlyRate: number | null
+  /** Manager-only — a time record logged against this task inherits this value at creation; see TimeRecord.billable. */
+  billable: boolean
   createdAt: string
   updatedAt: string
 }
@@ -20,6 +22,7 @@ export interface TaskInput {
   description?: string | null
   assignedTo?: string | null
   hourlyRate?: number | null
+  billable?: boolean
 }
 
 export const TASK_STATUSES: TaskStatus[] = ['open', 'in_progress', 'done']

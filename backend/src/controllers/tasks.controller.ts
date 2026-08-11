@@ -13,6 +13,7 @@ const createTaskSchema = z.object({
   description: z.string().max(2000).nullable().optional(),
   assignedTo: z.string().nullable().optional(),
   hourlyRate: z.number().min(0).nullable().optional(),
+  billable: z.boolean().optional(),
 });
 
 const updateTaskSchema = z.object({
@@ -21,6 +22,7 @@ const updateTaskSchema = z.object({
   status: z.enum(['open', 'in_progress', 'done']).optional(),
   assignedTo: z.string().nullable().optional(),
   hourlyRate: z.number().min(0).nullable().optional(),
+  billable: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -69,7 +71,8 @@ export async function update(req: Request, res: Response, next: NextFunction): P
       req.params.projectId as string,
       data,
       teamReq.team.teamId,
-      authReq.user.userId
+      authReq.user.userId,
+      teamReq.team.role === 'manager'
     );
     res.json({ task });
   } catch (err) {

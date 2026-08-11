@@ -2,9 +2,9 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 7** — supersedes Revision 6
+**Revision 8** — supersedes Revision 7
 
-*Adds a configurable, per-user notification and automation backbone (overdue invoices, missed weekly time entries, projects ending soon, approval backlogs), closing the automatic-overdue-transition gap noted against INV-16 along the way.*
+*Moves billability from the time record to the task: a task now carries a manager-only, server-enforced billable flag, and a time record inherits it as an immutable snapshot at creation rather than each entry being marked billable individually.*
 
 ## Legend
 
@@ -12,6 +12,10 @@
 - **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
 - Unmarked items are unchanged from the prior revision.
+
+## Summary of Changes in Revision 8
+
+This revision changes who controls whether logged time is billable. Previously (TR-6, Revision 5) each team member chose billable/non-billable per time entry. Now that control moves to the task: **CPT-14** gives every task a billable flag, changeable only by a manager and enforced server-side (not just hidden in the UI, unlike the still-open CPT-12/CPT-13/RB-4 gaps on a task's other fields) — and a time record inherits that setting as an immutable snapshot the moment it's created (**TR-6**, revised), the same pattern already used for a record's resolved rate and currency. Task selection on a time record is now mandatory (**TR-1**, revised) rather than optional, since there's otherwise nothing to inherit from. Records logged before this revision, when tasks were optional, keep their own already-set billable value and are not retroactively required to have a task.
 
 ## Summary of Changes in Revision 7
 
@@ -25,12 +29,12 @@ This revision documented two things. First, the invoicing enhancements built aft
 
 ## Time Recording
 
-- **TR-1** — The software must record the time that a user does work. Every time record must be associated with exactly one project and, where applicable, one task.
+- **TR-1** *(REVISED)* — The software must record the time that a user does work. Every time record must be associated with exactly one project and exactly one task — a task is mandatory going forward (see TR-6), not optional as in earlier revisions. Time records logged before this rule remain valid without a task; see CPT-14.
 - **TR-2** — The software must not use a live timer.
 - **TR-3** — The user must write time data manually into a digital form.
 - **TR-4** — The frontend software must use a calendar widget to let the user select the date and the time.
 - **TR-5** — The software must let the user change recorded time data, except where the record has been approved and locked (see UA-16).
-- **TR-6** — The software must let the user mark a time record as billable or not billable.
+- **TR-6** *(REVISED)* — A time record's billable status must not be set directly by the user. It is inherited from its task's billable setting (see CPT-14) at the moment the record is created, as an immutable snapshot — the same pattern already used for a record's resolved rate and currency (RB-6/RB-10) — so a manager later changing a task's billable setting never silently alters an already-logged entry.
 - **TR-7** — The software must record time to a minimum granularity of one minute, and must reject a time record where the end time is not later than the start time.
 - **TR-8** *(REVISED)* — The software must prevent (not merely warn against) saving a new or edited time record that overlaps an existing time record for the same user on the same date — checked across every project and task the user has logged time against that day, not only the same project and task.
 - **TR-9** — The software must let the user attach a free-text note (up to 1,000 characters) to a time record.
@@ -51,6 +55,7 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **CPT-11** — The backend software must calculate the total time recorded for a project.
 - **CPT-12** *(GAP)* — A task must have a status of open, in progress, or done. The status may be set by a manager or by the team member assigned to the task.
 - **CPT-13** *(GAP)* — The software must let a manager assign a task to one member of the collaborative team.
+- **CPT-14** *(NEW)* — A task must have a billable flag (default: billable), settable only by a manager — enforced server-side, unlike CPT-12/CPT-13/RB-4's still-open gaps for a task's other fields (see Known Implementation Gaps). This is the single point of control for whether time logged against it can be invoiced (see TR-6, INV-1), rather than each team member deciding per entry.
 
 ## Rates and Billing
 
@@ -176,7 +181,7 @@ This revision documented two things. First, the invoicing enhancements built aft
 This section lists every requirement above marked **(GAP)**, with its practical impact, so open work stays visible to stakeholders rather than being silently assumed complete.
 
 - **CPT-10** — A project's budget-vs-actual view only totals cost in the first currency it encounters. If a project's currency is changed after time has already been logged against it, the budget progress display silently ignores cost recorded in the earlier currency.
-- **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team.
+- **CPT-12, CPT-13** — Task status changes and task assignment are restricted to managers / the assigned member only in the UI. The underlying API does not yet enforce this — any authenticated team member calling the API directly could change any task's status or reassign it, and there is no server-side check that an assignee is even a member of the team. (CPT-14's `billable` field is the one task field that *is* properly manager-enforced server-side — this gap covers everything else on a task.)
 - **RB-4** — Setting a task's hourly rate has the same gap as CPT-12/13: the API does not restrict this to managers, though the UI does.
 - **RB-8, RB-9** — Hourly-rate redaction for non-managers is enforced only in the frontend (a UI component hides the value unless the viewer is a manager). The API itself returns each time record's full resolved rate regardless of the caller's role, so a regular user calling the API directly could read a rate they're not authorized to view.
 - **UA-9** — The team record does track its original creator, but authorization currently checks only the current manager role. If a creator is later demoted from manager by someone else, they lose the ability to remove members, revoke roles, or delete the team that the written requirement intends them to keep.
