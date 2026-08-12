@@ -19,6 +19,16 @@ export async function getInvoice(teamId: string, invoiceId: string): Promise<Inv
   return data.invoice
 }
 
+/** For a collective invoice, also returns each pooled personal invoice — used to render the
+ * detail view grouped by contributor (each one's own line items under its own invoice number). */
+export async function getInvoiceWithPooled(
+  teamId: string,
+  invoiceId: string
+): Promise<{ invoice: Invoice; pooledInvoices: Invoice[] }> {
+  const { data } = await api.get<{ invoice: Invoice; pooledInvoices: Invoice[] }>(`/teams/${teamId}/invoices/${invoiceId}`)
+  return data
+}
+
 export async function createPersonalInvoice(teamId: string, input: CreatePersonalInvoiceInput): Promise<Invoice> {
   const { data } = await api.post<{ invoice: Invoice }>(`/teams/${teamId}/invoices`, input).catch((err) => {
     throw friendlyInvoiceNumberError(err)

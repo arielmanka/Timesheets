@@ -204,7 +204,11 @@ export async function getOne(req: Request, res: Response, next: NextFunction): P
       req.params.invoiceId as string,
       teamReq.team.teamId
     );
-    res.json({ invoice });
+    // For a collective invoice, the detail view renders each pooled personal
+    // invoice's own line items grouped under its own invoice number (INV-25/
+    // INV-28) — an empty array for a personal invoice.
+    const pooledInvoices = await invoiceService.getPooledPersonalInvoices(invoice);
+    res.json({ invoice, pooledInvoices });
   } catch (err) {
     next(err);
   }
@@ -347,13 +351,8 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
 
     const { stringify } = await import('csv-stringify/sync');
 
-    // A collective invoice has no tax rate of its own — each line item is a
-    // pooled personal invoice, at that person's own VAT rate — so it gets
-    // VAT/Net/Gross columns instead of the personal invoice's Rate/Amount.
     const isCollective = invoice.type === 'collective';
-    const blankRow = isCollective
-      ? { Description: '', Units: '', VAT: '', Net: '', Gross: '' }
-      : { Description: '', Units: '', Rate: '', Amount: '' };
+    const blankRow = { Description: '', Units: '', Rate: '', Amount: '' };
     const metaRow = (description: string) => ({ ...blankRow, Description: description });
 
     const header = [
@@ -378,31 +377,49 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       ...(preparerBankAccount ? [metaRow('Payment details:'), ...formatBankAccountLines(preparerBankAccount).map(metaRow)] : []),
       blankRow,
     ];
-    const rows = invoice.lineItems.map((item) =>
-      isCollective
-        ? {
-            Description: item.description,
-            Units: item.hours,
-            VAT: `${item.taxRate ?? 0}%`,
-            Net: item.netAmount ?? item.amount,
-            Gross: item.amount,
-          }
-        : { Description: item.description, Units: item.hours, Rate: item.rate, Amount: item.amount }
-    );
+    const lineItemRow = (item: { description: string; hours: number; rate: number; amount: number }) => ({
+      Description: item.description,
+      Units: item.hours,
+      Rate: item.rate,
+      Amount: item.amount,
+    });
+
+    let rows: Array<{ Description: string; Units: number | string; Rate: number | string; Amount: number | string }>;
+    if (isCollective) {
+      // Each pooled personal invoice's own line items, grouped under a
+      // heading of that invoice's number (INV-25/INV-28) — same Units/Rate/
+      // Amount columns as a personal invoice, plus that contributor's own
+      // Subtotal/VAT/Total so the breakdown isn't lost once expanded.
+      const pooled = await invoiceService.getPooledPersonalInvoices(invoice);
+      rows = [];
+      for (const personal of pooled) {
+        rows.push(metaRow(`Invoice #${personal.invoiceNumber}`));
+        rows.push(...personal.lineItems.map(lineItemRow));
+        for (const item of personal.manualItems) {
+          rows.push({ Description: item.description, Units: 0, Rate: 0, Amount: item.amount });
+        }
+        rows.push({ ...blankRow, Description: 'Subtotal', Amount: personal.subtotal });
+        for (const tax of personal.taxes) {
+          rows.push({ ...blankRow, Description: `${tax.name} (${tax.rate}%)`, Amount: tax.amount });
+        }
+        rows.push({ ...blankRow, Description: 'Total', Amount: personal.total });
+        rows.push(blankRow);
+      }
+    } else {
+      rows = invoice.lineItems.map(lineItemRow);
+    }
 
     for (const item of invoice.manualItems) {
-      rows.push(
-        isCollective
-          ? { Description: item.description, Units: 0, VAT: '', Net: item.amount, Gross: item.amount }
-          : { Description: item.description, Units: 0, Rate: 0, Amount: item.amount }
-      );
+      rows.push({ Description: item.description, Units: 0, Rate: 0, Amount: item.amount });
     }
 
     // Subtotal/tax(es)/total — every tax entry is listed unconditionally,
     // including a 0% one (e.g. a reverse-charge or exempt invoice still
-    // needs the rate on record, not just silently no line at all).
-    const summaryRow = (label: string, amount: number) =>
-      isCollective ? { ...blankRow, Description: label, Gross: amount } : { ...blankRow, Description: label, Amount: amount };
+    // needs the rate on record, not just silently no line at all). A
+    // collective invoice has no tax rate of its own, so this is just its
+    // grand Subtotal/Total, with each contributor's own tax already broken
+    // out within their group above.
+    const summaryRow = (label: string, amount: number) => ({ ...blankRow, Description: label, Amount: amount });
     const summaryRows = [
       blankRow,
       summaryRow('Subtotal', invoice.subtotal),
@@ -539,51 +556,98 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     doc.fontSize(12).font('Body-Bold').text('Line Items', { underline: true });
     doc.font('Body').moveDown(0.5);
 
-    // A collective invoice has no tax rate of its own — each line item is a
-    // pooled personal invoice at that person's own VAT rate — so it gets
-    // VAT/Net/Gross columns instead of the personal invoice's Rate/Amount.
     const isCollective = invoice.type === 'collective';
+
+    // Page-break safety: the loops below (especially a collective invoice's
+    // per-contributor groups) can run well past one page's worth of content,
+    // unlike the rest of this document's fixed-position layout.
+    const PAGE_BOTTOM = 720;
+    const ensureSpace = (currentY: number, needed = 18): number => {
+      if (currentY + needed > PAGE_BOTTOM) {
+        doc.addPage();
+        return 50;
+      }
+      return currentY;
+    };
 
     doc.fontSize(9);
     const tableTop = doc.y;
     doc.text('Description', 50, tableTop);
-    doc.text('Units', isCollective ? 250 : 300, tableTop, { width: 50, align: 'right' });
-    if (isCollective) {
-      doc.text('VAT', 310, tableTop, { width: 50, align: 'right' });
-      doc.text('Net', 370, tableTop, { width: 70, align: 'right' });
-      doc.text('Gross', 450, tableTop, { width: 70, align: 'right' });
-    } else {
-      doc.text('Rate', 370, tableTop, { width: 60, align: 'right' });
-      doc.text('Amount', 440, tableTop, { width: 80, align: 'right' });
-    }
-
+    doc.text('Units', 300, tableTop, { width: 50, align: 'right' });
+    doc.text('Rate', 370, tableTop, { width: 60, align: 'right' });
+    doc.text('Amount', 440, tableTop, { width: 80, align: 'right' });
     doc.moveTo(50, tableTop + 15).lineTo(520, tableTop + 15).stroke();
 
     let y = tableTop + 20;
-    for (const item of invoice.lineItems) {
-      doc.text(item.description, 50, y, { width: isCollective ? 190 : 240 });
-      doc.text(item.hours.toFixed(2), isCollective ? 250 : 300, y, { width: 50, align: 'right' });
-      if (isCollective) {
-        doc.text(`${item.taxRate ?? 0}%`, 310, y, { width: 50, align: 'right' });
-        doc.text((item.netAmount ?? item.amount).toFixed(2), 370, y, { width: 70, align: 'right' });
-        doc.text(item.amount.toFixed(2), 450, y, { width: 70, align: 'right' });
-      } else {
+
+    if (isCollective) {
+      // Each pooled personal invoice's own line items, grouped under a
+      // heading of that invoice's number (INV-25/INV-28) — same Description/
+      // Units/Rate/Amount columns as a personal invoice, rather than one
+      // aggregate VAT/Net/Gross row per contributor.
+      const pooled = await invoiceService.getPooledPersonalInvoices(invoice);
+      for (const personal of pooled) {
+        y = ensureSpace(y, 16);
+        doc.font('Body-Bold').text(`Invoice #${personal.invoiceNumber}`, 50, y, { width: 470 });
+        doc.font('Body');
+        y += 16;
+
+        for (const item of personal.lineItems) {
+          y = ensureSpace(y);
+          doc.text(item.description, 50, y, { width: 240 });
+          doc.text(item.hours.toFixed(2), 300, y, { width: 50, align: 'right' });
+          doc.text(item.rate.toFixed(2), 370, y, { width: 60, align: 'right' });
+          doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+          y += 18;
+        }
+        for (const item of personal.manualItems) {
+          y = ensureSpace(y);
+          doc.text(item.description, 50, y, { width: 240 });
+          doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+          y += 18;
+        }
+
+        // That contributor's own Subtotal/VAT/Total — reproduces what their
+        // personal invoice shows, so it reads as a mini-invoice-within-the-
+        // invoice rather than losing the breakdown once expanded into lines.
+        y = ensureSpace(y, 16);
+        doc.text('Subtotal:', 300, y, { width: 130, align: 'right' });
+        doc.text(personal.subtotal.toFixed(2), 440, y, { width: 80, align: 'right' });
+        y += 16;
+        for (const tax of personal.taxes) {
+          y = ensureSpace(y, 16);
+          doc.text(`${tax.name} (${tax.rate}%):`, 300, y, { width: 130, align: 'right' });
+          doc.text(tax.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+          y += 16;
+        }
+        y = ensureSpace(y, 16);
+        doc.font('Body-Bold');
+        doc.text('Total:', 300, y, { width: 130, align: 'right' });
+        doc.text(personal.total.toFixed(2), 440, y, { width: 80, align: 'right' });
+        doc.font('Body');
+        y += 26;
+      }
+    } else {
+      for (const item of invoice.lineItems) {
+        y = ensureSpace(y);
+        doc.text(item.description, 50, y, { width: 240 });
+        doc.text(item.hours.toFixed(2), 300, y, { width: 50, align: 'right' });
         doc.text(item.rate.toFixed(2), 370, y, { width: 60, align: 'right' });
         doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
+        y += 18;
       }
-      y += 18;
     }
 
-    // Manual items
+    // Manual items directly on this invoice (a collective invoice's own
+    // manual items, not tied to any pooled personal invoice — those were
+    // already listed within their own group above).
     for (const item of invoice.manualItems) {
-      doc.text(item.description, 50, y, { width: isCollective ? 190 : 240 });
-      if (isCollective) {
-        doc.text(item.amount.toFixed(2), 450, y, { width: 70, align: 'right' });
-      } else {
-        doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
-      }
+      y = ensureSpace(y);
+      doc.text(item.description, 50, y, { width: 240 });
+      doc.text(item.amount.toFixed(2), 440, y, { width: 80, align: 'right' });
       y += 18;
     }
+    y = ensureSpace(y, 30);
 
     // Totals
     y += 10;

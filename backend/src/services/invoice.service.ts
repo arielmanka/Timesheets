@@ -819,6 +819,28 @@ export async function getInvoiceById(invoiceId: string, teamId: string): Promise
 }
 
 // ---------------------------------------------------------------------------
+// The personal invoices pooled into a collective invoice, in pooling order —
+// used to render the collective invoice grouped by contributor (each
+// personal invoice's own line items under its own invoice-number heading,
+// INV-25/INV-28) rather than as one aggregate row per contributor. The
+// collective invoice's own `lineItems`/`subtotal`/`total` are untouched —
+// this is purely for display, not a change to how it's totaled.
+// ---------------------------------------------------------------------------
+export async function getPooledPersonalInvoices(invoice: IInvoice): Promise<IInvoice[]> {
+  if (invoice.type !== 'collective' || invoice.personalInvoiceIds.length === 0) {
+    return [];
+  }
+  const personalInvoices = await Invoice.find({ _id: { $in: invoice.personalInvoiceIds } });
+  const byId = new Map(personalInvoices.map((p) => [p._id.toString(), p]));
+  const result: IInvoice[] = [];
+  for (const id of invoice.personalInvoiceIds) {
+    const p = byId.get(id.toString());
+    if (p) result.push(p);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Reconciliation — fix inconsistencies from interrupted operations
 // ---------------------------------------------------------------------------
 export async function reconcile(): Promise<{ fixed: number; cleaned: number }> {

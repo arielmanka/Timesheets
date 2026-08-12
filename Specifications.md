@@ -2,9 +2,9 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 12** — supersedes Revision 11
+**Revision 13** — supersedes Revision 12
 
-*Reworks invoice export layout: a personal invoice's line-item description now reads "date, project, task" instead of a bare date/hours string; the Hours column is relabeled Units on both invoice types, in both PDF and CSV; and the Payment details section moves from the bottom of the PDF (after the totals) to the header area, right-justified, directly below Period — so the client sees how to pay before the itemized breakdown.*
+*Expands a collective invoice's display: instead of one aggregate row per pooled personal invoice, every contributor's own line items are now listed under a heading of their invoice number, using the same Description/Units/Rate/Amount columns as a personal invoice, followed by that contributor's own Subtotal/VAT/Total — in the PDF, the CSV, and the in-app detail view alike. The underlying stored totals and pooling logic are unchanged; this is a display-layer change only.*
 
 ## Legend
 
@@ -12,6 +12,10 @@
 - **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
 - Unmarked items are unchanged from the prior revision.
+
+## Summary of Changes in Revision 13
+
+The user asked for the collective invoice's layout to list every pooled personal invoice's own line items, grouped under a heading of that invoice's number, rather than one summary row per contributor. **INV-28** is new and **INV-12** is revised accordingly: a collective invoice's display (PDF, CSV, and the in-app detail view) now renders, for each pooled personal invoice, a heading of its invoice number followed by its own line items and manual items using the same Description/Units/Rate/Amount columns as a personal invoice (not the previous per-contributor VAT/Net/Gross aggregate columns), followed by that contributor's own Subtotal, tax line(s), and Total — reproducing what their personal invoice itself shows rather than collapsing it into one row. This revises the description carve-out in **INV-25**, which previously said a collective invoice's line-item description stays as the invoice number: that's still true of the underlying *stored* aggregate line item (used for the collective's own subtotal/total math, pooling, and unpooling — all unchanged), but the *displayed* breakdown now expands each contributor's own line items beneath their heading. The collective invoice's own grand Subtotal/Total (and, separately, any manual items added directly on the collective invoice itself) are unaffected and still appear once, after every contributor's group.
 
 ## Summary of Changes in Revision 12
 
@@ -103,7 +107,7 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **INV-9** *(REVISED)* — The software must let any team member generate a personal invoice for their own approved, billable, un-invoiced time on a project — not limited to contractors billing B2B.
 - **INV-10** — The software must store a user's personal invoice in a collective invoicing pool for the project.
 - **INV-11** — The software must let the user with the manager role create, view, and transmit a collective invoice to the client.
-- **INV-12** — The collective invoice must group and include all personal invoices from the invoicing pool for a selected period.
+- **INV-12** *(REVISED)* — The collective invoice must group and include all personal invoices from the invoicing pool for a selected period, displaying each one's own line items under a heading of its invoice number (see INV-28) rather than a single summary row per contributor.
 - **INV-13** *(REVISED)* — The software must build a collective invoice exclusively from personal invoices that their owner has already created and sent — direct inclusion of un-invoiced time records by the manager, as specified in Revision 5, has been removed from product scope. Every contributor must issue and send their own personal invoice before their time can be consolidated into a collective invoice.
 - **INV-14** — The software must mark a time record as invoiced once it is included on any invoice, and must exclude invoiced time records from future invoice generation. If a draft invoice is deleted before transmission, its time records must be unmarked as invoiced.
 - **INV-15** *(REVISED)* — The software must assign each invoice a sequential invoice number, unique within its team, in the format `yyyymmdd-NNNNNN` (creation date plus a 6-digit, zero-padded, per-team sequence that never resets or reuses a number).
@@ -119,6 +123,7 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **INV-25** *(NEW)* — A personal invoice's line-item description must read as the date (`yyyy-mm-dd`), the project name, and the task name, comma-separated (task name omitted if the underlying time record has no task, for records logged before a task became mandatory). A collective invoice's line-item description is unchanged — each line remains the pooled personal invoice's own invoice number.
 - **INV-26** *(NEW)* — The line-item quantity column, on both invoice types and in every export/view (PDF, CSV, and the in-app invoice detail view), must be labeled "Units" rather than "Hours." This is a label change only — the column still contains and totals hours; no other column is affected.
 - **INV-27** *(NEW)* — On the PDF export, the Payment details section must be positioned in the header's right-aligned metadata column, directly below Period and above Due date/Payment terms — above the Line Items table rather than after the totals. Applies to both personal and collective invoices, which share the same PDF layout code.
+- **INV-28** *(NEW)* — In every place a collective invoice's contents are shown (PDF export, CSV export, and the in-app invoice detail view), each pooled personal invoice must be displayed as a heading of its own invoice number, followed by its own line items and manual items (same Description/Units/Rate/Amount columns as a personal invoice), followed by that contributor's own Subtotal, tax line(s), and Total. This is a display-only requirement — it does not change how the collective invoice's own totals are stored or computed, nor the pooling/unpooling behavior of INV-10/INV-13.
 
 ## Reports and Data
 

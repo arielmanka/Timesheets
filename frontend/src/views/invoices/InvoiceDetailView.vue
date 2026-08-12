@@ -35,14 +35,18 @@ const ui = useUiStore()
 
 const invoice = ref<Invoice | null>(null)
 const poolInvoice = ref<Invoice | null>(null)
+// Collective invoices only — each pooled personal invoice, so its own line
+// items can be rendered grouped under its own invoice number.
+const pooledInvoices = ref<Invoice[]>([])
 
 const { loading, run: load } = useAsyncAction(async () => {
-  const [inv] = await Promise.all([
-    invoicesService.getInvoice(teamId, invoiceId),
+  const [{ invoice: inv, pooledInvoices: pooled }] = await Promise.all([
+    invoicesService.getInvoiceWithPooled(teamId, invoiceId),
     projects.loaded ? Promise.resolve() : projects.fetchAll(teamId),
     clients.loaded ? Promise.resolve() : clients.fetchAll(teamId),
   ])
   invoice.value = inv
+  pooledInvoices.value = pooled
 
   poolInvoice.value = inv.includedInCollectiveInvoiceId
     ? await invoicesService.getInvoice(teamId, inv.includedInCollectiveInvoiceId)
@@ -122,14 +126,18 @@ async function loadEligiblePersonalInvoices(): Promise<void> {
     unpooled: true,
   })
 }
+async function refreshPooledInvoices(): Promise<void> {
+  const { pooledInvoices: pooled } = await invoicesService.getInvoiceWithPooled(teamId, invoiceId)
+  pooledInvoices.value = pooled
+}
 const { loading: poolingInvoice, run: handleAddToPool } = useAsyncAction(async (personalInvoiceId: string) => {
   invoice.value = await invoices.addToPool(teamId, invoiceId, personalInvoiceId)
-  await loadEligiblePersonalInvoices()
+  await Promise.all([loadEligiblePersonalInvoices(), refreshPooledInvoices()])
   ui.success('Added to pool.')
 })
 const { loading: unpoolingInvoice, run: handleRemoveFromPool } = useAsyncAction(async (personalInvoiceId: string) => {
   invoice.value = await invoices.removeFromPool(teamId, invoiceId, personalInvoiceId)
-  await loadEligiblePersonalInvoices()
+  await Promise.all([loadEligiblePersonalInvoices(), refreshPooledInvoices()])
   ui.success('Removed from pool.')
 })
 
@@ -279,9 +287,8 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
           <tr v-if="invoice.type === 'collective'">
             <th class="px-4 py-2 font-medium">Description</th>
             <th class="px-4 py-2 text-right font-medium">Units</th>
-            <th class="px-4 py-2 text-right font-medium">VAT</th>
-            <th class="px-4 py-2 text-right font-medium">Net</th>
-            <th class="px-4 py-2 text-right font-medium">Gross</th>
+            <th class="px-4 py-2 text-right font-medium">Rate</th>
+            <th class="px-4 py-2 text-right font-medium">Amount</th>
             <th v-if="isManagedCollectiveDraft" class="px-4 py-2"></th>
           </tr>
           <tr v-else>
@@ -293,31 +300,67 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
           </tr>
         </thead>
         <tbody class="divide-y divide-surface-100" v-if="invoice.type === 'collective'">
-          <tr v-for="(item, i) in invoice.lineItems" :key="`li-${i}`">
-            <td class="px-4 py-2">{{ item.description }}</td>
-            <td class="px-4 py-2 text-right tabular-nums">{{ item.hours.toFixed(2) }}</td>
-            <td class="px-4 py-2 text-right tabular-nums">{{ item.taxRate ?? 0 }}%</td>
-            <td class="px-4 py-2 text-right tabular-nums">
-              <CurrencyDisplay :amount="item.netAmount ?? item.amount" :currency="invoice.currency" />
-            </td>
-            <td class="px-4 py-2 text-right tabular-nums">
-              <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
-            </td>
-            <td class="px-4 py-2 text-right">
-              <button
-                v-if="isManagedCollectiveDraft && item.personalInvoiceId"
-                type="button"
-                class="text-xs font-medium text-danger-600 hover:underline"
-                :disabled="unpoolingInvoice"
-                @click="handleRemoveFromPool(item.personalInvoiceId)"
-              >
-                Remove from pool
-              </button>
-            </td>
-          </tr>
+          <template v-for="personal in pooledInvoices" :key="personal._id">
+            <tr class="bg-surface-50">
+              <td class="px-4 py-2 font-semibold text-surface-800" colspan="3">Invoice #{{ personal.invoiceNumber }}</td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2 text-right">
+                <button
+                  v-if="isManagedCollectiveDraft"
+                  type="button"
+                  class="text-xs font-medium text-danger-600 hover:underline"
+                  :disabled="unpoolingInvoice"
+                  @click="handleRemoveFromPool(personal._id)"
+                >
+                  Remove from pool
+                </button>
+              </td>
+            </tr>
+            <tr v-for="(item, i) in personal.lineItems" :key="`${personal._id}-li-${i}`">
+              <td class="px-4 py-2 pl-8">{{ item.description }}</td>
+              <td class="px-4 py-2 text-right tabular-nums">{{ item.hours.toFixed(2) }}</td>
+              <td class="px-4 py-2 text-right tabular-nums">{{ item.rate.toFixed(2) }}</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
+              </td>
+              <td class="px-4 py-2"></td>
+            </tr>
+            <tr v-for="(item, i) in personal.manualItems" :key="`${personal._id}-mi-${i}`">
+              <td class="px-4 py-2 pl-8">{{ item.description }}</td>
+              <td class="px-4 py-2 text-right text-surface-300">—</td>
+              <td class="px-4 py-2 text-right text-surface-300">—</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                <CurrencyDisplay :amount="item.amount" :currency="invoice.currency" />
+              </td>
+              <td class="px-4 py-2"></td>
+            </tr>
+            <tr class="text-surface-500">
+              <td class="px-4 py-2" colspan="2"></td>
+              <td class="px-4 py-2 text-right">Subtotal:</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                <CurrencyDisplay :amount="personal.subtotal" :currency="invoice.currency" />
+              </td>
+              <td class="px-4 py-2"></td>
+            </tr>
+            <tr v-for="tax in personal.taxes" :key="`${personal._id}-tax-${tax.name}-${tax.rate}`" class="text-surface-500">
+              <td class="px-4 py-2" colspan="2"></td>
+              <td class="px-4 py-2 text-right">{{ tax.name }} ({{ tax.rate }}%):</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                <CurrencyDisplay :amount="tax.amount" :currency="invoice.currency" />
+              </td>
+              <td class="px-4 py-2"></td>
+            </tr>
+            <tr class="font-medium text-surface-800">
+              <td class="px-4 py-2" colspan="2"></td>
+              <td class="px-4 py-2 text-right">Total:</td>
+              <td class="px-4 py-2 text-right tabular-nums">
+                <CurrencyDisplay :amount="personal.total" :currency="invoice.currency" />
+              </td>
+              <td class="px-4 py-2"></td>
+            </tr>
+          </template>
           <tr v-for="(item, i) in invoice.manualItems" :key="`mi-${i}`">
             <td class="px-4 py-2">{{ item.description }}</td>
-            <td class="px-4 py-2 text-right text-surface-300">—</td>
             <td class="px-4 py-2 text-right text-surface-300">—</td>
             <td class="px-4 py-2 text-right text-surface-300">—</td>
             <td class="px-4 py-2 text-right tabular-nums">
