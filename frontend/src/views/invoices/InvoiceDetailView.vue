@@ -278,7 +278,7 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
         <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
           <tr v-if="invoice.type === 'collective'">
             <th class="px-4 py-2 font-medium">Description</th>
-            <th class="px-4 py-2 text-right font-medium">Hours</th>
+            <th class="px-4 py-2 text-right font-medium">Units</th>
             <th class="px-4 py-2 text-right font-medium">VAT</th>
             <th class="px-4 py-2 text-right font-medium">Net</th>
             <th class="px-4 py-2 text-right font-medium">Gross</th>
@@ -286,7 +286,7 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
           </tr>
           <tr v-else>
             <th class="px-4 py-2 font-medium">Description</th>
-            <th class="px-4 py-2 text-right font-medium">Hours</th>
+            <th class="px-4 py-2 text-right font-medium">Units</th>
             <th class="px-4 py-2 text-right font-medium">Rate</th>
             <th class="px-4 py-2 text-right font-medium">Amount</th>
             <th v-if="isOwnPersonalDraft" class="px-4 py-2"></th>

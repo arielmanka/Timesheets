@@ -2,9 +2,9 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 11** — supersedes Revision 10
+**Revision 12** — supersedes Revision 11
 
-*Fixes a bug where a non-billable task's time still carried a nonzero resolved rate and cost whenever any rate — task, project, member, or a Revision 10 member-rate override — happened to be configured. A non-billable task must always resolve to $0, full stop.*
+*Reworks invoice export layout: a personal invoice's line-item description now reads "date, project, task" instead of a bare date/hours string; the Hours column is relabeled Units on both invoice types, in both PDF and CSV; and the Payment details section moves from the bottom of the PDF (after the totals) to the header area, right-justified, directly below Period — so the client sees how to pay before the itemized breakdown.*
 
 ## Legend
 
@@ -12,6 +12,10 @@
 - **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
 - Unmarked items are unchanged from the prior revision.
+
+## Summary of Changes in Revision 12
+
+The user requested specific layout changes to both invoice types' exports. **INV-25** is new: a personal invoice's line-item description, previously just `"YYYY-MM-DD — X.XXh"`, now reads `"YYYY-MM-DD, Project, Task"` (task name omitted for the small number of historical time records logged before TR-1 made a task mandatory) — a collective invoice's line-item description is unchanged (each line is still the pooled personal invoice's own invoice number). **INV-26** is new: the line-item quantity column, previously labeled "Hours" everywhere it appeared (PDF, CSV, and the in-app invoice detail view, on both invoice types), is now labeled "Units" in all of those places for consistency — this doesn't change what the column contains (hours are still what's recorded and totaled) or any other column (Rate, Amount, VAT, Net, Gross are unchanged). **INV-27** is new: on the PDF export only, the Payment details section moves from after the totals/tax note (near the bottom of the document) to the header's right-aligned metadata column, positioned directly below Period and above Due date/Payment terms — so it now renders above the Line Items table rather than below it. The CSV export already listed Payment details ahead of the line items and is unaffected by this positional change (CSV has no visual "right-justified" concept to apply).
 
 ## Summary of Changes in Revision 11
 
@@ -112,6 +116,9 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **INV-22** *(NEW)* — The software must let the user attach a free-text tax/legal note to an invoice (for example, a reverse-charge or exemption reference for an intra-EU transaction), displayed prominently on the invoice and included in its PDF and CSV exports.
 - **INV-23** *(NEW)* — For a personal invoice, the software must automatically derive its supply/service period from the minimum and maximum date of its included time records, recalculated whenever a time record is added to or removed from the draft — the period must never be manually entered on a personal invoice. A collective invoice retains its own manually chosen period, set at creation.
 - **INV-24** *(NEW)* — A contractor's incorporation profile must support an optional phone number, printed alongside the company's other details on invoice exports.
+- **INV-25** *(NEW)* — A personal invoice's line-item description must read as the date (`yyyy-mm-dd`), the project name, and the task name, comma-separated (task name omitted if the underlying time record has no task, for records logged before a task became mandatory). A collective invoice's line-item description is unchanged — each line remains the pooled personal invoice's own invoice number.
+- **INV-26** *(NEW)* — The line-item quantity column, on both invoice types and in every export/view (PDF, CSV, and the in-app invoice detail view), must be labeled "Units" rather than "Hours." This is a label change only — the column still contains and totals hours; no other column is affected.
+- **INV-27** *(NEW)* — On the PDF export, the Payment details section must be positioned in the header's right-aligned metadata column, directly below Period and above Due date/Payment terms — above the Line Items table rather than after the totals. Applies to both personal and collective invoices, which share the same PDF layout code.
 
 ## Reports and Data
 

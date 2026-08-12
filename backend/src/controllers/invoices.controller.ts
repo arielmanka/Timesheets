@@ -352,8 +352,8 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
     // VAT/Net/Gross columns instead of the personal invoice's Rate/Amount.
     const isCollective = invoice.type === 'collective';
     const blankRow = isCollective
-      ? { Description: '', Hours: '', VAT: '', Net: '', Gross: '' }
-      : { Description: '', Hours: '', Rate: '', Amount: '' };
+      ? { Description: '', Units: '', VAT: '', Net: '', Gross: '' }
+      : { Description: '', Units: '', Rate: '', Amount: '' };
     const metaRow = (description: string) => ({ ...blankRow, Description: description });
 
     const header = [
@@ -382,19 +382,19 @@ export async function exportCsv(req: Request, res: Response, next: NextFunction)
       isCollective
         ? {
             Description: item.description,
-            Hours: item.hours,
+            Units: item.hours,
             VAT: `${item.taxRate ?? 0}%`,
             Net: item.netAmount ?? item.amount,
             Gross: item.amount,
           }
-        : { Description: item.description, Hours: item.hours, Rate: item.rate, Amount: item.amount }
+        : { Description: item.description, Units: item.hours, Rate: item.rate, Amount: item.amount }
     );
 
     for (const item of invoice.manualItems) {
       rows.push(
         isCollective
-          ? { Description: item.description, Hours: 0, VAT: '', Net: item.amount, Gross: item.amount }
-          : { Description: item.description, Hours: 0, Rate: 0, Amount: item.amount }
+          ? { Description: item.description, Units: 0, VAT: '', Net: item.amount, Gross: item.amount }
+          : { Description: item.description, Units: 0, Rate: 0, Amount: item.amount }
       );
     }
 
@@ -465,6 +465,22 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
       doc.text(periodText, 300, rightY, { width: 245, align: 'right' });
       rightY += 14;
     }
+
+    // Payment details — moved above the line items table, right-justified,
+    // directly below Period, so the client sees how to pay before the
+    // itemized breakdown rather than after the totals at the bottom.
+    if (preparerBankAccount) {
+      rightY += 6;
+      doc.font('Body-Bold').text('Payment details', 300, rightY, { width: 245, align: 'right' });
+      rightY += 14;
+      doc.font('Body');
+      for (const line of formatBankAccountLines(preparerBankAccount)) {
+        doc.text(line, 300, rightY, { width: 245, align: 'right' });
+        rightY += 14;
+      }
+      rightY += 6;
+    }
+
     if (invoice.dueDate) {
       doc.text(`Due date: ${invoice.dueDate.toISOString().slice(0, 10)}`, 300, rightY, { width: 245, align: 'right' });
       rightY += 14;
@@ -531,7 +547,7 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     doc.fontSize(9);
     const tableTop = doc.y;
     doc.text('Description', 50, tableTop);
-    doc.text('Hours', isCollective ? 250 : 300, tableTop, { width: 50, align: 'right' });
+    doc.text('Units', isCollective ? 250 : 300, tableTop, { width: 50, align: 'right' });
     if (isCollective) {
       doc.text('VAT', 310, tableTop, { width: 50, align: 'right' });
       doc.text('Net', 370, tableTop, { width: 70, align: 'right' });
@@ -594,16 +610,6 @@ export async function exportPdf(req: Request, res: Response, next: NextFunction)
     if (invoice.taxNote) {
       doc.y = y + 30;
       doc.font('Body-Bold').fontSize(10).text(invoice.taxNote, 50, doc.y, { width: 470 });
-    }
-
-    // Payment details — the bank account this invoice should be paid into.
-    if (preparerBankAccount) {
-      doc.moveDown(1.5);
-      doc.font('Body-Bold').fontSize(11).text('Payment details', { underline: true });
-      doc.font('Body').fontSize(10);
-      for (const line of formatBankAccountLines(preparerBankAccount)) {
-        doc.text(line);
-      }
     }
 
     // Notes

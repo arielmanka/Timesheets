@@ -2,6 +2,7 @@ import { Invoice, type IInvoice, type InvoiceStatus, type ILineItem } from '../m
 import { InvoiceCounter } from '../models/InvoiceCounter.js';
 import { TimeRecord, type ITimeRecord } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
+import { Task } from '../models/Task.js';
 import { Client } from '../models/Client.js';
 import { User } from '../models/User.js';
 import { isBankAccountComplete } from '../models/shared/bankAccount.js';
@@ -108,9 +109,10 @@ function recalcTotals(invoice: IInvoice, taxRules: Array<{ name: string; rate: n
   invoice.total = Math.round((invoice.subtotal + totalTax) * 100) / 100;
 }
 
-function timeRecordLineItem(record: ITimeRecord): ILineItem {
+function timeRecordLineItem(record: ITimeRecord, projectName: string, taskName: string | null): ILineItem {
+  const description = [record.date.toISOString().slice(0, 10), projectName, taskName].filter((part) => part).join(', ');
   return {
-    description: `${record.date.toISOString().slice(0, 10)} — ${(record.durationMinutes / 60).toFixed(2)}h`,
+    description,
     hours: Math.round((record.durationMinutes / 60) * 100) / 100,
     rate: record.resolvedRate,
     amount: record.calculatedCost,
@@ -221,7 +223,12 @@ export async function createPersonalInvoice(
   }
 
   const invoiceNumber = formatInvoiceNumber(await getNextInvoiceNumber(teamId), new Date());
-  const lineItems = records.map(timeRecordLineItem);
+  const taskIds = [...new Set(records.map((r) => r.taskId?.toString()).filter((id): id is string => !!id))];
+  const tasks = await Task.find({ _id: { $in: taskIds } });
+  const taskNameById = new Map(tasks.map((t) => [t._id.toString(), t.name]));
+  const lineItems = records.map((r) =>
+    timeRecordLineItem(r, project.name, r.taskId ? (taskNameById.get(r.taskId.toString()) ?? null) : null)
+  );
   const manualSubtotal = (data.manualItems ?? []).reduce((sum, item) => sum + item.amount, 0);
 
   const invoice = new Invoice({
@@ -312,7 +319,11 @@ export async function addTimeRecordToDraft(
     );
   }
 
-  invoice.lineItems.push(timeRecordLineItem(record));
+  const [project, task] = await Promise.all([
+    Project.findById(invoice.projectId),
+    record.taskId ? Task.findById(record.taskId) : Promise.resolve(null),
+  ]);
+  invoice.lineItems.push(timeRecordLineItem(record, project?.name ?? 'Unknown project', task?.name ?? null));
   invoice.timeRecordIds.push(record._id);
 
   recalcTotals(invoice, invoice.taxes.map((t) => ({ name: t.name, rate: t.rate })));
