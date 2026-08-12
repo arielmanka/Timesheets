@@ -12,6 +12,7 @@ const {
   mockUserFindOne,
   mockUserFindById,
   mockAuditLog,
+  mockMemberRateDeleteMany,
 } = vi.hoisted(() => ({
   mockTeamSave: vi.fn().mockResolvedValue(undefined),
   mockTeamFindById: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockUserFindOne: vi.fn(),
   mockUserFindById: vi.fn().mockResolvedValue({ firstName: 'Target', lastName: 'User' }),
   mockAuditLog: vi.fn().mockResolvedValue(undefined),
+  mockMemberRateDeleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
 }));
 
 vi.mock('../../src/models/Team.js', () => {
@@ -44,6 +46,12 @@ vi.mock('../../src/models/User.js', () => ({
   User: {
     findOne: mockUserFindOne,
     findById: mockUserFindById,
+  },
+}));
+
+vi.mock('../../src/models/MemberRate.js', () => ({
+  MemberRate: {
+    deleteMany: mockMemberRateDeleteMany,
   },
 }));
 

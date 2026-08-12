@@ -35,9 +35,13 @@ const { loading: adding, run: addFoundUser } = useAsyncAction(async () => {
 
 // --- Rate editing ----------------------------------------------------------
 const editingRateFor = ref<string | null>(null)
-const rateDraft = ref('')
+const rateDraft = ref<string | number>('')
 const { loading: savingRate, run: saveRate } = useAsyncAction(async (userId: string) => {
-  const value = rateDraft.value.trim() === '' ? null : Number(rateDraft.value)
+  // Vue 3.4+ auto-coerces v-model on <input type="number"> to a Number once
+  // the user types, even without the .number modifier — rateDraft can hold
+  // either type depending on whether it's been touched since being reset.
+  const raw = rateDraft.value
+  const value = raw === '' || raw === null || raw === undefined ? null : Number(raw)
   await teamsService.setMemberRate(teamId, userId, value)
   editingRateFor.value = null
   await team.refreshCurrent()

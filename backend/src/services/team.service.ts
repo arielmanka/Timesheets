@@ -1,5 +1,6 @@
 import { Team, type ITeam, type TeamRole } from '../models/Team.js';
 import { User } from '../models/User.js';
+import { MemberRate } from '../models/MemberRate.js';
 import * as auditService from './audit.service.js';
 import { logger } from '../config/logger.js';
 import { AppError } from '../utils/errors.js';
@@ -206,6 +207,11 @@ export async function removeMember(
 
   team.members.splice(memberIndex, 1);
   await team.save();
+
+  // A removed member's rate overrides (RB-11) would otherwise linger as
+  // orphaned rows nothing else ever cleans up — harmless (resolvedRate is
+  // snapshotted per RB-6) but pointless to keep around.
+  await MemberRate.deleteMany({ teamId, userId: targetUserId });
 
   logger.info({ teamId, targetUserId, actorId }, 'Member removed from team');
   return team;

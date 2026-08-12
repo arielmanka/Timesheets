@@ -8,11 +8,13 @@ import { useTeamStore } from '../../stores/team'
 import { useAuthStore } from '../../stores/auth'
 import * as projectsService from '../../services/projects.service'
 import * as reportsService from '../../services/reports.service'
+import * as memberRatesService from '../../services/memberRates.service'
 import { useAsyncAction } from '../../composables/useAsyncAction'
 import { useUiStore } from '../../stores/ui'
 import type { Project, ProjectStatus, TaxRule } from '../../types/project'
 import type { Task, TaskInput, TaskStatus } from '../../types/task'
 import type { ReportSummary } from '../../types/report'
+import type { MemberRate } from '../../types/memberRate'
 import { PROJECT_STATUSES } from '../../types/project'
 import { TASK_STATUSES } from '../../types/task'
 import AppButton from '../../components/ui/AppButton.vue'
@@ -36,6 +38,7 @@ const ui = useUiStore()
 
 const project = ref<Project | null>(null)
 const budgetActual = ref<ReportSummary | null>(null)
+const memberRates = ref<MemberRate[]>([])
 
 const { loading, run: load } = useAsyncAction(async () => {
   const [p] = await Promise.all([
@@ -49,8 +52,43 @@ const { loading, run: load } = useAsyncAction(async () => {
     // be rejected, and rejected time never should have counted at all.
     budgetActual.value = await reportsService.getReportSummary(teamId, { projectId, status: 'approved' })
   }
+  if (team.isManager) {
+    memberRates.value = await memberRatesService.listMemberRates(teamId, projectId)
+  }
 })
 onMounted(load)
+
+// --- Member rate overrides (RB-11) ----------------------------------------
+// A manager's rate for a specific team member, scoped to this project or —
+// via the per-task modal below — to one task within it. Wins over the flat
+// task/project rate in resolveRate's precedence; see rateResolver.service.ts.
+function rateFor(userId: string, taskId: string | null): number | null {
+  return memberRates.value.find((r) => r.userId === userId && r.taskId === taskId)?.hourlyRate ?? null
+}
+
+const editingRateFor = ref<string | null>(null)
+const rateDraft = ref<string | number>('')
+function startEditRate(userId: string, taskId: string | null): void {
+  editingRateFor.value = userId
+  rateDraft.value = rateFor(userId, taskId) === null ? '' : String(rateFor(userId, taskId))
+}
+const { loading: savingRate, run: saveMemberRate } = useAsyncAction(async (userId: string, taskId: string | null) => {
+  // Vue 3.4+ auto-coerces v-model on <input type="number"> to a Number once
+  // the user types, even without the .number modifier — rateDraft can hold
+  // either type depending on whether it's been touched since being reset.
+  const raw = rateDraft.value
+  const value = raw === '' || raw === null || raw === undefined ? null : Number(raw)
+  await memberRatesService.setMemberRate(teamId, projectId, userId, taskId, value)
+  editingRateFor.value = null
+  memberRates.value = await memberRatesService.listMemberRates(teamId, projectId)
+})
+
+// --- Per-task rate overrides modal -----------------------------------------
+const rateModalTask = ref<Task | null>(null)
+function openTaskRates(task: Task): void {
+  editingRateFor.value = null
+  rateModalTask.value = task
+}
 
 const clientName = computed(() => clients.items.find((c) => c._id === project.value?.clientId)?.name ?? '—')
 
@@ -248,6 +286,42 @@ function assigneeName(userId: string | null): string {
       </div>
     </div>
 
+    <div v-if="team.isManager">
+      <h2 class="mb-3 text-sm font-semibold text-surface-800">Member rates</h2>
+      <p class="mb-3 text-xs text-surface-500">
+        A member's own rate wins over the task's or project's rate above. Leave blank to fall back to their team
+        rate, or the task/project rate if that isn't set either.
+      </p>
+      <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
+            <tr>
+              <th class="px-4 py-2.5 font-medium">Name</th>
+              <th class="px-4 py-2.5 font-medium">Rate on this project</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-surface-100">
+            <tr v-for="member in team.current?.members" :key="member.userId">
+              <td class="px-4 py-2.5 text-surface-900">{{ member.firstName }} {{ member.lastName }}</td>
+              <td class="px-4 py-2.5">
+                <template v-if="editingRateFor === member.userId">
+                  <div class="flex items-center gap-1">
+                    <input v-model="rateDraft" type="number" step="0.01" min="0" class="field-control w-24 py-1" />
+                    <AppButton variant="ghost" :loading="savingRate" @click="saveMemberRate(member.userId, null)">
+                      Save
+                    </AppButton>
+                  </div>
+                </template>
+                <button v-else type="button" class="hover:underline" @click="startEditRate(member.userId, null)">
+                  <RateField :amount="rateFor(member.userId, null)" :currency="project.currency" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <div>
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-sm font-semibold text-surface-800">Tasks</h2>
@@ -284,6 +358,7 @@ function assigneeName(userId: string | null): string {
               <option v-for="s in TASK_STATUSES" :key="s" :value="s">{{ s.replace('_', ' ') }}</option>
             </select>
             <StatusPill v-else :status="task.status" />
+            <AppButton v-if="team.isManager" variant="ghost" @click="openTaskRates(task)">Rates</AppButton>
             <AppButton v-if="team.isManager" variant="ghost" @click="openEditTask(task)">Edit</AppButton>
           </div>
         </li>
@@ -370,6 +445,53 @@ function assigneeName(userId: string | null): string {
       <template #footer>
         <AppButton variant="secondary" @click="showTaskForm = false">Cancel</AppButton>
         <AppButton form="task-form" type="submit" :loading="savingTask">{{ editingTask ? 'Save' : 'Create' }}</AppButton>
+      </template>
+    </Modal>
+
+    <!-- Per-task member rate overrides modal -->
+    <Modal v-if="rateModalTask" :title="`Member rates — ${rateModalTask.name}`" @close="rateModalTask = null">
+      <p class="mb-3 text-xs text-surface-500">
+        Wins over this member's project rate and team rate, and over this task's own rate. Leave blank to fall back.
+      </p>
+      <div class="overflow-x-auto rounded-lg border border-surface-200">
+        <table class="w-full text-sm">
+          <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
+            <tr>
+              <th class="px-4 py-2.5 font-medium">Name</th>
+              <th class="px-4 py-2.5 font-medium">Rate on this task</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-surface-100">
+            <tr v-for="member in team.current?.members" :key="member.userId">
+              <td class="px-4 py-2.5 text-surface-900">{{ member.firstName }} {{ member.lastName }}</td>
+              <td class="px-4 py-2.5">
+                <template v-if="editingRateFor === member.userId">
+                  <div class="flex items-center gap-1">
+                    <input v-model="rateDraft" type="number" step="0.01" min="0" class="field-control w-24 py-1" />
+                    <AppButton
+                      variant="ghost"
+                      :loading="savingRate"
+                      @click="saveMemberRate(member.userId, rateModalTask!._id)"
+                    >
+                      Save
+                    </AppButton>
+                  </div>
+                </template>
+                <button
+                  v-else
+                  type="button"
+                  class="hover:underline"
+                  @click="startEditRate(member.userId, rateModalTask!._id)"
+                >
+                  <RateField :amount="rateFor(member.userId, rateModalTask!._id)" :currency="project.currency" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <template #footer>
+        <AppButton variant="secondary" @click="rateModalTask = null">Close</AppButton>
       </template>
     </Modal>
   </div>

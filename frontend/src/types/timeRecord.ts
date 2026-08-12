@@ -1,7 +1,7 @@
 import type { ID } from './common'
 
 export type TimeRecordStatus = 'pending' | 'approved' | 'rejected'
-export type RateSource = 'task' | 'project' | 'member'
+export type RateSource = 'task' | 'project' | 'member' | 'non_billable'
 
 export interface ChangeHistoryEntry {
   field: string

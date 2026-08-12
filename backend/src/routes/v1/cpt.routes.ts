@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as clientsController from '../../controllers/clients.controller.js';
 import * as projectsController from '../../controllers/projects.controller.js';
 import * as tasksController from '../../controllers/tasks.controller.js';
+import * as memberRatesController from '../../controllers/memberRates.controller.js';
 import * as timeRecordsController from '../../controllers/timeRecords.controller.js';
 import * as invoicesController from '../../controllers/invoices.controller.js';
 import * as reportsController from '../../controllers/reports.controller.js';
@@ -37,6 +38,14 @@ router.patch('/:teamId/projects/:projectId/status', requireManager, projectsCont
 router.post('/:teamId/projects/:projectId/tasks', requireManager, tasksController.create);
 router.get('/:teamId/projects/:projectId/tasks', requireTeamMember, tasksController.list);
 router.patch('/:teamId/projects/:projectId/tasks/:taskId', requireTeamMember, tasksController.update);
+
+// ---------------------------------------------------------------------------
+// Member rate override routes — nested under /teams/:teamId/projects/:projectId
+// (RB-11): a manager's rate override for one team member, scoped to the
+// project or to a specific task within it.
+// ---------------------------------------------------------------------------
+router.get('/:teamId/projects/:projectId/member-rates', requireManager, memberRatesController.list);
+router.patch('/:teamId/projects/:projectId/member-rates/:userId', requireManager, memberRatesController.set);
 
 // ---------------------------------------------------------------------------
 // Time record routes — nested under /teams/:teamId/time-records

@@ -105,13 +105,12 @@ export async function createTimeRecord(
     );
   }
 
-  // Resolve rate (RB-5) and calculate cost (RB-6)
-  const resolved = await resolveRate(
-    data.projectId,
-    data.taskId,
-    userId,
-    teamId
-  );
+  // Resolve rate (RB-5) and calculate cost (RB-6) — a non-billable task
+  // (CPT-14) means no rate applies at all: every tier of RB-5's precedence
+  // is skipped rather than resolving a rate that just isn't charged.
+  const resolved = task.billable
+    ? await resolveRate(data.projectId, data.taskId, userId, teamId)
+    : { rate: 0, source: 'non_billable' as const, currency: project.currency };
 
   const calculatedCost = (durationMinutes / 60) * resolved.rate;
 
@@ -181,7 +180,11 @@ export async function updateTimeRecord(
     record.note = data.note;
   }
   // Reassigning the task re-derives billable from the new task — billable
-  // is never set directly by the user, only ever inherited (see create).
+  // is never set directly by the user, only ever inherited (see create). It
+  // also requires a fresh rate resolution: the new task may carry its own
+  // flat rate or a member-specific override (RB-11) that differs from the
+  // old task's, so the previously resolved rate can't just be kept as-is.
+  let taskChanged = false;
   if (data.taskId !== undefined) {
     const oldTaskId = record.taskId?.toString() ?? null;
     if (oldTaskId !== data.taskId) {
@@ -198,6 +201,7 @@ export async function updateTimeRecord(
         record.billable = newTask.billable;
       }
       record.taskId = data.taskId as any;
+      taskChanged = true;
     }
   }
 
@@ -219,17 +223,19 @@ export async function updateTimeRecord(
         'TIME_OVERLAP'
       );
     }
+  }
 
-    // Re-resolve rate and recalculate cost
-    const resolved = await resolveRate(
-      record.projectId.toString(),
-      record.taskId?.toString() ?? null,
-      userId,
-      teamId
-    );
+  // Re-resolve rate and recalculate cost whenever the task changed or the
+  // duration changed — either can change which rate applies. A non-billable
+  // task (record.billable, already re-derived above on reassignment) skips
+  // every tier of RB-5's precedence — see createTimeRecord.
+  if (taskChanged || data.startTime !== undefined || data.endTime !== undefined) {
+    const resolved = record.billable
+      ? await resolveRate(record.projectId.toString(), record.taskId?.toString() ?? null, userId, teamId)
+      : { rate: 0, source: 'non_billable' as const, currency: record.currency };
     record.resolvedRate = resolved.rate;
     record.rateSource = resolved.source;
-    record.calculatedCost = (durationMinutes / 60) * resolved.rate;
+    record.calculatedCost = (record.durationMinutes / 60) * resolved.rate;
   }
 
   // Append change history

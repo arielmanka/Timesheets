@@ -4,7 +4,7 @@ import mongoose, { Schema, type Document, type Model, type Types } from 'mongoos
 // Interfaces
 // ---------------------------------------------------------------------------
 export type TimeRecordStatus = 'pending' | 'approved' | 'rejected';
-export type RateSource = 'task' | 'project' | 'member';
+export type RateSource = 'task' | 'project' | 'member' | 'non_billable';
 
 export interface IChangeHistoryEntry {
   field: string;
@@ -106,7 +106,7 @@ const timeRecordSchema = new Schema<ITimeRecord>(
     },
     rateSource: {
       type: String,
-      enum: ['task', 'project', 'member'],
+      enum: ['task', 'project', 'member', 'non_billable'],
       required: true,
     },
     calculatedCost: {

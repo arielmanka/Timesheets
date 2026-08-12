@@ -2,9 +2,9 @@
 
 ## Project, Task, and Time Tracking Application
 
-**Revision 9** — supersedes Revision 8
+**Revision 11** — supersedes Revision 10
 
-*Closes the enforcement gap where a task's status had no effect on time entry: a completed task's third status value is renamed from "done" to "complete" for consistency with project status naming (CPT-7), and the backend now rejects logging or reassigning time against a completed task, with the time-entry UI hiding completed tasks from selection to match.*
+*Fixes a bug where a non-billable task's time still carried a nonzero resolved rate and cost whenever any rate — task, project, member, or a Revision 10 member-rate override — happened to be configured. A non-billable task must always resolve to $0, full stop.*
 
 ## Legend
 
@@ -12,6 +12,16 @@
 - **(REVISED)** — requirement reworded, either to match a deliberate implementation decision or to correct wording that no longer describes the intended behavior.
 - **(GAP)** — the requirement is not fully met by the current implementation. See [Known Implementation Gaps](#known-implementation-gaps) at the end of this document for impact and detail.
 - Unmarked items are unchanged from the prior revision.
+
+## Summary of Changes in Revision 11
+
+The user found a real production instance: a DCPS task ("Training") is marked non-billable, yet a manager could still set a Revision 10 member-rate override on it, and a time record logged against it showed a nonzero calculated cost (CA$800 for 8 hours at the $100 override rate) despite being non-billable. **RB-5** is revised again: a non-billable task (CPT-14) now skips rate resolution entirely — every tier of the precedence is bypassed, not just left showing a rate that isn't charged — so `resolvedRate` and `calculatedCost` are always exactly 0 for a non-billable time record, both at creation and on any later re-resolution (a task reassignment or a time change). A new `RateSource` value, `non_billable`, records why the rate is 0 rather than reusing one of the real precedence tiers. The one existing production record affected by this bug (Ariel's August 17 Training entry) was corrected directly; no other record in the database was affected.
+
+## Summary of Changes in Revision 10
+
+The user asked to verify RB-5's rate precedence against their actual need: the same team member can legitimately bill different rates on different projects, or even different tasks within a project — something the previous flat per-team rate (RB-1) couldn't express. **RB-11** is new: a manager can set a rate for a specific team member scoped to a project, or further to one task within it, without touching that member's flat team-wide rate. **RB-5** is revised to a five-tier precedence — a member's task-level override, then their project-level override, then their flat team rate, then the task's own flat rate, then the project's own flat rate — so a member's own rate (at whatever specificity was configured) always wins over the task's or project's generic rate, and the more specific override always wins over the less specific one. Reassigning a time record's task (**TR-5**) now always re-resolves the rate, closing a gap where reassignment alone (without also changing the logged times) silently left the old task's rate in place.
+
+While implementing this, the exact same rate-editing UI pattern (an inline "click to edit, type a number, Save" control, present since Revision 5's original **RB-1** rate-setting UI) was found to be silently broken everywhere it was used, including on the pre-existing Team Members page — a manager typing a new rate and clicking Save did nothing, with no visible error. The cause: Vue 3.4 changed `<input type="number">` to auto-convert its `v-model` value to a JavaScript number even without the `.number` modifier, but the save handler assumed a string and called `.trim()` on it, throwing silently. Fixed everywhere the pattern occurs.
 
 ## Summary of Changes in Revision 9
 
@@ -68,12 +78,13 @@ This revision documented two things. First, the invoicing enhancements built aft
 - **RB-2** — The software must let a user with the manager role set the currency for the project.
 - **RB-3** — The software must let a user with the manager role set an hourly monetary rate for a project.
 - **RB-4** *(GAP)* — The software must let a user with the manager role set an hourly monetary rate for a specific task.
-- **RB-5** — The backend software must resolve exactly one rate for each time record using the following precedence: (1) the task rate, if set; (2) otherwise the project rate, if set; (3) otherwise the team member's rate. The resolved rate must be used for cost calculation.
+- **RB-5** *(REVISED)* — For a time record logged against a billable task, the backend software must resolve exactly one rate using the following precedence: (1) the member's rate override for the specific task, if set; (2) otherwise the member's rate override for the project, if set; (3) otherwise the member's flat team-wide rate, if set; (4) otherwise the task's flat rate, if set; (5) otherwise the project's flat rate. The resolved rate must be used for cost calculation. Reassigning a time record's task must re-resolve the rate under this precedence, not just at creation. A time record logged against a non-billable task (CPT-14) must skip this precedence entirely — its resolved rate and calculated cost must always be 0, regardless of any rate configured at any tier.
 - **RB-6** — The backend software must calculate the cost of a time record using the resolved rate at the time the record is created, and must store the calculated cost on the record. A later change to a team member's, project's, or task's rate must not retroactively alter the cost of previously calculated time records.
 - **RB-7** — The software must let the user group and view total cost by project, by task, or by user, subject to the access rules in Section 6.
 - **RB-8** *(GAP)* — The software must not let the regular user view the hourly rate of other users, or of a project or task.
 - **RB-9** *(GAP)* — The software must let a regular user view the calculated cost of their own time records without exposing the underlying hourly rate of a user, project, or task they are not authorized to view.
 - **RB-10** *(REVISED)* — The software must calculate and store each time record's cost using the currency configured for its project at the moment the record is created, and must retain that currency as an immutable snapshot on the record even if the project's currency setting is changed afterward. Any view or export that aggregates cost across multiple time records or invoices — reports, invoice pools, budget totals — must group and total by each record's own currency rather than summing figures from different currencies together.
+- **RB-11** *(NEW)* — A manager may set a rate for a specific team member that overrides that member's flat team-wide rate (RB-1), scoped either to a project or to one task within a project — letting the same person bill different rates on different projects, or different tasks within the same project. Enforced server-side, manager-only, same as CPT-14 rather than extending the CPT-12/CPT-13/RB-4 UI-only gaps.
 
 ## Invoices
 

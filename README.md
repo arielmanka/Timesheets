@@ -19,7 +19,8 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 - Weekly grid entry with mandatory project + task selection and notes — a time record's billable status is never set directly; it's inherited from its task as an immutable snapshot at creation (same pattern as its resolved rate/currency), so a manager always controls what's billable rather than each entry deciding for itself
 - Hard overlap prevention — a user can't log two overlapping entries on the same day, even across different teams
 - Entries can't be logged outside a project's active date range
-- Rate resolution with clear precedence: task rate → project rate → team-member rate
+- Rate resolution with clear precedence: a member's own rate wins over the generic task/project rate, and a more specific override wins over a less specific one — member's task-level override → member's project-level override → member's flat team rate → task's flat rate → project's flat rate. A reassignment re-resolves the rate under this order. A non-billable task always resolves to $0, skipping this precedence entirely regardless of what rates are configured anywhere
+- Managers can override a specific member's rate per project, or per task within a project, from the project page — without touching that member's flat team-wide rate
 - Filters by project, task, billable status, and approval status, plus a jump-to-date picker
 - Optional cross-team view: see your own time logged in every team you belong to (read-only outside the currently selected team), useful for understanding cross-team overlap blocks
 
