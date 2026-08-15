@@ -39,10 +39,13 @@ A team time-tracking, approval, and invoicing application. Members log time agai
 - A personal invoice's line items read "date, project, task"; the quantity column is labeled "Units" everywhere; Payment details prints in the PDF's header, right-justified below Period, above the line items rather than after the totals
 - A collective invoice's PDF, CSV, and in-app detail view all list every pooled personal invoice's own line items under a heading of its invoice number — same Description/Units/Rate/Amount columns as a personal invoice — followed by that contributor's own Subtotal/VAT/Total, rather than one summary row per contributor
 - Draft → sent → paid/partially paid/overdue lifecycle, with the ability to revert a sent (not yet paid, not yet pooled) invoice back to draft
+- Every recorded payment (amount, date, who recorded it) is kept as a visible history on the invoice, not just a single overwritable running total; a payment that would exceed the remaining balance is rejected rather than silently capped, and reaching the total is compared with cent-level rounding so the invoice reliably flips to Paid; once a personal invoice is pooled into a collective invoice, payments can only be recorded on the collective invoice
 - PDF and CSV export, including payment/bank details, due date, payment terms, and tax note, with full Unicode font support (Polish, and other Latin-Extended-A text render correctly, unlike PDFKit's default fonts)
 
 **Reporting**
 - Team time/cost summaries by project, by task, and by user, with CSV/PDF export
+- Trend charts (hours and cost over time) on the Reports page, for the selected period or the last 30 days by default — grouped separately by client, project, task, or user, with bucket granularity that widens from daily to weekly to monthly as the range grows, and a top-7-plus-"Other" cap so a chart never grows an unbounded number of lines; one chart for hours, one per currency for cost (never combined on a dual-axis chart); every line is curved (monotone interpolation, never overshooting a bucket's real value)
+- A matching pair of invoice trend charts (count and amount over time), grouped by client or by status, with personal and collective invoices always shown as two separate charts so a pooled invoice is never double-counted; a status's line uses that status's existing color from the rest of the app; a draft invoice counts but contributes $0 to the amount trend
 
 **Audit log**
 - Immutable, per-team audit trail of team-member/project/task rate changes and time record approvals/reversions/rejections/invoice generation, each entry denormalized with actor and entity names at write time so it stays readable even if a project or user is later renamed or removed
@@ -79,7 +82,7 @@ Nginx terminates TLS and reverse-proxies static asset / SPA requests to the Vite
 
 | Layer | Technology |
 |---|---|
-| Frontend | Vue 3 (Composition API), Vite, TypeScript, Pinia, Vue Router, Tailwind CSS |
+| Frontend | Vue 3 (Composition API), Vite, TypeScript, Pinia, Vue Router, Tailwind CSS, Chart.js/vue-chartjs (trend charts) |
 | Backend | Node.js, Express, TypeScript, Mongoose, Zod validation |
 | Database | MongoDB (standalone) |
 | Auth | JWT (short-lived access + rotating refresh tokens), Argon2 password hashing |
@@ -222,7 +225,7 @@ All routes are versioned under `/api/v1`. Team-scoped routes (`/teams/:teamId/..
 | Tasks | `/api/v1/teams/:teamId/projects/:projectId/tasks` | create manager-only |
 | Time records | `/api/v1/teams/:teamId/time-records` | create/update/delete by owner; approve/unapprove/reject manager-only |
 | Invoices | `/api/v1/teams/:teamId/invoices` | personal invoices by owner; collective invoices, pooling, and payments are manager-only; PDF/CSV export |
-| Reports | `/api/v1/teams/:teamId/reports` | team time/cost summaries, CSV/PDF export |
+| Reports | `/api/v1/teams/:teamId/reports` | team time/cost summaries and trend charts, CSV/PDF export |
 | Audit log | `/api/v1/teams/:teamId/audit-log` | manager-only, filterable by event type / entity type / date range |
 | Notifications | `/api/v1/users/me/notifications`, `/api/v1/users/me/notification-preferences` | per-user inbox (list/mark read) and rule-type preferences — not team-scoped |
 

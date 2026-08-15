@@ -1,8 +1,9 @@
-import { TimeRecord, type TimeRecordStatus } from '../models/TimeRecord.js';
+import { TimeRecord, type ITimeRecord, type TimeRecordStatus } from '../models/TimeRecord.js';
 import { Project } from '../models/Project.js';
 import { Task } from '../models/Task.js';
 import { Invoice, type InvoiceStatus, type InvoiceType } from '../models/Invoice.js';
 import { Client } from '../models/Client.js';
+import { User } from '../models/User.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,25 +69,34 @@ export interface ReportSummary {
 // and historical entries should keep reporting under the currency they were
 // actually billed in.
 // ---------------------------------------------------------------------------
-export async function getSummary(
+// ---------------------------------------------------------------------------
+// Shared scoping: resolves the team's matching projects and time records for
+// a report filter, including role-scoping (RPT-6) — used by getSummary and
+// getTrend so the two never drift on what "matches this filter" means.
+// `projectMap` carries clientId too so a caller can group by client without
+// a second Project query.
+// ---------------------------------------------------------------------------
+async function resolveScopedRecords(
   filter: ReportFilter,
   isManager: boolean,
   requestingUserId: string
-): Promise<ReportSummary> {
-  // Get project IDs for this team
+): Promise<{
+  records: ITimeRecord[];
+  projectMap: Map<string, { name: string; clientId: string }>;
+  taskMap: Map<string, string>;
+}> {
   const projectFilter: Record<string, unknown> = { teamId: filter.teamId };
   if (filter.clientId) projectFilter.clientId = filter.clientId;
   if (filter.projectId) projectFilter._id = filter.projectId;
 
   const projects = await Project.find(projectFilter);
   const projectIds = projects.map((p) => p._id);
-  const projectMap = new Map(projects.map((p) => [p._id.toString(), p.name]));
+  const projectMap = new Map(projects.map((p) => [p._id.toString(), { name: p.name, clientId: p.clientId.toString() }]));
 
   if (projectIds.length === 0) {
-    return { totalHours: 0, costByCurrency: [], byProject: [], byUser: [], byTask: [], records: [] };
+    return { records: [], projectMap, taskMap: new Map() };
   }
 
-  // Build time record query
   const query: Record<string, unknown> = {
     projectId: { $in: projectIds },
   };
@@ -111,6 +121,20 @@ export async function getSummary(
 
   const tasks = await Task.find({ projectId: { $in: projectIds } });
   const taskMap = new Map(tasks.map((t) => [t._id.toString(), t.name]));
+
+  return { records, projectMap, taskMap };
+}
+
+export async function getSummary(
+  filter: ReportFilter,
+  isManager: boolean,
+  requestingUserId: string
+): Promise<ReportSummary> {
+  const { records, projectMap, taskMap } = await resolveScopedRecords(filter, isManager, requestingUserId);
+
+  if (projectMap.size === 0) {
+    return { totalHours: 0, costByCurrency: [], byProject: [], byUser: [], byTask: [], records: [] };
+  }
 
   // Aggregate — every map is keyed by `${id}:${currency}` so entries in
   // different currencies never collapse into one row.
@@ -155,7 +179,7 @@ export async function getSummary(
       const [id, currency] = key.split(':');
       return {
         projectId: id,
-        projectName: projectMap.get(id) ?? 'Unknown',
+        projectName: projectMap.get(id)?.name ?? 'Unknown',
         currency,
         hours: Math.round(data.hours * 100) / 100,
         cost: Math.round(data.cost * 100) / 100,
@@ -194,6 +218,181 @@ export async function getSummary(
       status: r.status,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Trend — hours and cost over time, grouped by client/project/task/user
+// (RPT-8/RPT-9). No date-bucketing precedent existed in this codebase before
+// this, so it follows the same find-and-reduce-in-JS style as getSummary
+// rather than introducing a Mongo aggregation pipeline.
+// ---------------------------------------------------------------------------
+export type TrendGroupBy = 'client' | 'project' | 'task' | 'user';
+export type TrendGranularity = 'day' | 'week' | 'month';
+
+export interface TrendSeries {
+  id: string;
+  name: string;
+  currency: string;
+  hours: number[];
+  cost: number[];
+}
+
+export interface TrendResult {
+  groupBy: TrendGroupBy;
+  granularity: TrendGranularity;
+  buckets: string[];
+  series: TrendSeries[];
+}
+
+const MAX_TREND_SERIES = 7;
+const OTHER_ID = '__other__';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function toUtcMidnight(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+function startOfIsoWeek(d: Date): Date {
+  const day = (d.getUTCDay() + 6) % 7; // 0 = Monday .. 6 = Sunday
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+}
+
+function bucketStartForDate(d: Date, granularity: TrendGranularity): Date {
+  if (granularity === 'day') return toUtcMidnight(d);
+  if (granularity === 'week') return startOfIsoWeek(d);
+  return startOfMonth(d);
+}
+
+function generateBucketDates(start: Date, end: Date, granularity: TrendGranularity): Date[] {
+  const dates: Date[] = [];
+  if (granularity === 'day') {
+    for (let t = start.getTime(); t <= end.getTime(); t += DAY_MS) dates.push(new Date(t));
+  } else if (granularity === 'week') {
+    const lastStart = startOfIsoWeek(end).getTime();
+    for (let t = startOfIsoWeek(start).getTime(); t <= lastStart; t += 7 * DAY_MS) dates.push(new Date(t));
+  } else {
+    let cur = startOfMonth(start);
+    const last = startOfMonth(end).getTime();
+    while (cur.getTime() <= last) {
+      dates.push(cur);
+      cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+    }
+  }
+  return dates;
+}
+
+export async function getTrend(
+  filter: ReportFilter,
+  groupBy: TrendGroupBy,
+  isManager: boolean,
+  requestingUserId: string
+): Promise<TrendResult> {
+  // Default to the last 30 days when no explicit range is given (and fill in
+  // whichever single side is missing if only one was).
+  const effectiveEnd = toUtcMidnight(filter.endDate ?? new Date());
+  const effectiveStart = toUtcMidnight(filter.startDate ?? new Date(effectiveEnd.getTime() - 29 * DAY_MS));
+
+  const spanDays = Math.round((effectiveEnd.getTime() - effectiveStart.getTime()) / DAY_MS) + 1;
+  const granularity: TrendGranularity = spanDays <= 62 ? 'day' : spanDays <= 182 ? 'week' : 'month';
+
+  const { records, projectMap, taskMap } = await resolveScopedRecords(
+    { ...filter, startDate: effectiveStart, endDate: effectiveEnd },
+    isManager,
+    requestingUserId
+  );
+
+  const bucketDates = generateBucketDates(effectiveStart, effectiveEnd, granularity);
+  const buckets = bucketDates.map((d) => d.toISOString().slice(0, 10));
+  const bucketIndexByKey = new Map(buckets.map((b, i) => [b, i]));
+
+  const clientIds =
+    groupBy === 'client' ? [...new Set(Array.from(projectMap.values()).map((p) => p.clientId))] : [];
+  const clients = clientIds.length ? await Client.find({ _id: { $in: clientIds } }) : [];
+  const clientNameById = new Map(clients.map((c) => [c._id.toString(), c.name]));
+
+  const userIds = groupBy === 'user' ? [...new Set(records.map((r) => r.userId.toString()))] : [];
+  const users = userIds.length ? await User.find({ _id: { $in: userIds } }) : [];
+  const userNameById = new Map(users.map((u) => [u._id.toString(), `${u.firstName} ${u.lastName}`]));
+
+  function entityFor(r: ITimeRecord): { id: string; name: string } {
+    if (groupBy === 'project') {
+      const p = projectMap.get(r.projectId.toString());
+      return { id: r.projectId.toString(), name: p?.name ?? 'Unknown project' };
+    }
+    if (groupBy === 'client') {
+      const p = projectMap.get(r.projectId.toString());
+      const clientId = p?.clientId ?? 'unknown';
+      return { id: clientId, name: clientNameById.get(clientId) ?? 'Unknown client' };
+    }
+    if (groupBy === 'task') {
+      const id = r.taskId?.toString() ?? '__none__';
+      return { id, name: id === '__none__' ? 'No task' : (taskMap.get(id) ?? 'Unknown task') };
+    }
+    const id = r.userId.toString();
+    return { id, name: userNameById.get(id) ?? 'Unknown user' };
+  }
+
+  // Pass 1: bucket every (entity:currency) pair, and separately track each
+  // entity's total hours (currency-agnostic — hours aren't currency-specific)
+  // to rank for the series cap below.
+  const totalHoursByEntity = new Map<string, number>();
+  const seriesMap = new Map<string, { name: string; currency: string; hours: number[]; cost: number[] }>();
+
+  for (const r of records) {
+    const bucketDateKey = bucketStartForDate(r.date, granularity).toISOString().slice(0, 10);
+    const idx = bucketIndexByKey.get(bucketDateKey);
+    if (idx === undefined) continue;
+
+    const { id, name } = entityFor(r);
+    const hours = r.durationMinutes / 60;
+    totalHoursByEntity.set(id, (totalHoursByEntity.get(id) ?? 0) + hours);
+
+    const key = `${id}:${r.currency}`;
+    const entry =
+      seriesMap.get(key) ?? { name, currency: r.currency, hours: new Array(buckets.length).fill(0), cost: new Array(buckets.length).fill(0) };
+    entry.hours[idx] += hours;
+    entry.cost[idx] += r.calculatedCost;
+    seriesMap.set(key, entry);
+  }
+
+  // Cap at MAX_TREND_SERIES, ranked by total hours descending — never a
+  // generated 9th color; the tail folds into "Other" per currency.
+  const rankedIds = Array.from(totalHoursByEntity.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id);
+  const keepIds = new Set(rankedIds.slice(0, MAX_TREND_SERIES));
+
+  const finalSeriesMap = new Map<string, { name: string; currency: string; hours: number[]; cost: number[] }>();
+  for (const [key, entry] of seriesMap.entries()) {
+    const [id, currency] = key.split(':');
+    if (keepIds.has(id)) {
+      finalSeriesMap.set(key, entry);
+      continue;
+    }
+    const otherKey = `${OTHER_ID}:${currency}`;
+    const otherEntry =
+      finalSeriesMap.get(otherKey) ??
+      { name: 'Other', currency, hours: new Array(buckets.length).fill(0), cost: new Array(buckets.length).fill(0) };
+    for (let i = 0; i < buckets.length; i++) {
+      otherEntry.hours[i] += entry.hours[i];
+      otherEntry.cost[i] += entry.cost[i];
+    }
+    finalSeriesMap.set(otherKey, otherEntry);
+  }
+
+  const series: TrendSeries[] = Array.from(finalSeriesMap.entries()).map(([key, data]) => ({
+    id: key.split(':')[0]!,
+    name: data.name,
+    currency: data.currency,
+    hours: data.hours.map((h) => Math.round(h * 100) / 100),
+    cost: data.cost.map((c) => Math.round(c * 100) / 100),
+  }));
+
+  return { groupBy, granularity, buckets, series };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +561,149 @@ export async function getInvoiceReport(
       createdAt: i.createdAt,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Invoice trend — count and amount over time, grouped by client or by
+// status (RPT-10/RPT-11). Bucketed by createdAt, same convention already
+// used by getInvoiceReport's date filter. Reuses the bucket-generation
+// helpers defined above for the time trend (getTrend) — same granularity
+// rules, same default-30-days behavior.
+// ---------------------------------------------------------------------------
+export type InvoiceTrendGroupBy = 'client' | 'status';
+
+export interface InvoiceTrendSeries {
+  id: string;
+  name: string;
+  currency: string;
+  count: number[];
+  amount: number[];
+}
+
+export interface InvoiceTrendResult {
+  groupBy: InvoiceTrendGroupBy;
+  granularity: TrendGranularity;
+  buckets: string[];
+  series: InvoiceTrendSeries[];
+}
+
+const INVOICE_STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft',
+  sent: 'Sent',
+  partially_paid: 'Partially paid',
+  overdue: 'Overdue',
+  paid: 'Paid',
+};
+
+export async function getInvoiceTrend(
+  filter: InvoiceReportFilter,
+  groupBy: InvoiceTrendGroupBy,
+  isManager: boolean,
+  requestingUserId: string
+): Promise<InvoiceTrendResult> {
+  const effectiveEnd = toUtcMidnight(filter.endDate ?? new Date());
+  const effectiveStart = toUtcMidnight(filter.startDate ?? new Date(effectiveEnd.getTime() - 29 * DAY_MS));
+
+  const spanDays = Math.round((effectiveEnd.getTime() - effectiveStart.getTime()) / DAY_MS) + 1;
+  const granularity: TrendGranularity = spanDays <= 62 ? 'day' : spanDays <= 182 ? 'week' : 'month';
+
+  // createdAt is a full timestamp, not a date-only field like TimeRecord.date
+  // — the upper bound must reach the end of effectiveEnd's calendar day, not
+  // its midnight start, or every invoice created later that same day (i.e.
+  // virtually all of them) would be excluded.
+  const query: Record<string, unknown> = {
+    teamId: filter.teamId,
+    createdAt: { $gte: effectiveStart, $lt: new Date(effectiveEnd.getTime() + DAY_MS) },
+  };
+  if (!isManager) query.createdBy = requestingUserId;
+  if (filter.clientId) query.clientId = filter.clientId;
+  if (filter.type) query.type = filter.type;
+  if (filter.status) query.status = filter.status;
+  if (filter.paid !== undefined) {
+    query.status = filter.paid ? 'paid' : { $ne: 'paid' };
+  }
+
+  const invoices = await Invoice.find(query);
+
+  const bucketDates = generateBucketDates(effectiveStart, effectiveEnd, granularity);
+  const buckets = bucketDates.map((d) => d.toISOString().slice(0, 10));
+  const bucketIndexByKey = new Map(buckets.map((b, i) => [b, i]));
+
+  const clientIds = groupBy === 'client' ? [...new Set(invoices.map((i) => i.clientId.toString()))] : [];
+  const clients = clientIds.length ? await Client.find({ _id: { $in: clientIds } }) : [];
+  const clientNameById = new Map(clients.map((c) => [c._id.toString(), c.name]));
+
+  function entityFor(inv: { status: string; clientId: unknown }): { id: string; name: string } {
+    if (groupBy === 'status') {
+      return { id: inv.status, name: INVOICE_STATUS_LABELS[inv.status] ?? inv.status };
+    }
+    const id = (inv.clientId as { toString(): string }).toString();
+    return { id, name: clientNameById.get(id) ?? 'Unknown client' };
+  }
+
+  // Ranked by count, not amount — count is currency-agnostic (same reason
+  // getTrend ranks by hours rather than cost), so it's a stable basis for a
+  // single ranking even when a client's invoices span several currencies.
+  const totalCountByEntity = new Map<string, number>();
+  const seriesMap = new Map<string, { name: string; currency: string; count: number[]; amount: number[] }>();
+
+  for (const inv of invoices) {
+    const bucketDateKey = bucketStartForDate(inv.createdAt, granularity).toISOString().slice(0, 10);
+    const idx = bucketIndexByKey.get(bucketDateKey);
+    if (idx === undefined) continue;
+
+    const { id, name } = entityFor(inv);
+    totalCountByEntity.set(id, (totalCountByEntity.get(id) ?? 0) + 1);
+
+    const key = `${id}:${inv.currency}`;
+    const entry =
+      seriesMap.get(key) ?? { name, currency: inv.currency, count: new Array(buckets.length).fill(0), amount: new Array(buckets.length).fill(0) };
+    entry.count[idx] += 1;
+    // A draft invoice isn't a real claim on a client yet — counted, but not
+    // charted as money, same rule getInvoiceReport already applies.
+    if (inv.status !== 'draft') {
+      entry.amount[idx] += inv.total;
+    }
+    seriesMap.set(key, entry);
+  }
+
+  // Cap at MAX_TREND_SERIES for "client" (status never has more than 5
+  // values, so it never needs folding).
+  let finalSeriesMap = seriesMap;
+  if (groupBy === 'client') {
+    const rankedIds = Array.from(totalCountByEntity.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => id);
+    const keepIds = new Set(rankedIds.slice(0, MAX_TREND_SERIES));
+
+    finalSeriesMap = new Map();
+    for (const [key, entry] of seriesMap.entries()) {
+      const [id, currency] = key.split(':');
+      if (keepIds.has(id)) {
+        finalSeriesMap.set(key, entry);
+        continue;
+      }
+      const otherKey = `${OTHER_ID}:${currency}`;
+      const otherEntry =
+        finalSeriesMap.get(otherKey) ??
+        { name: 'Other', currency, count: new Array(buckets.length).fill(0), amount: new Array(buckets.length).fill(0) };
+      for (let i = 0; i < buckets.length; i++) {
+        otherEntry.count[i] += entry.count[i];
+        otherEntry.amount[i] += entry.amount[i];
+      }
+      finalSeriesMap.set(otherKey, otherEntry);
+    }
+  }
+
+  const series: InvoiceTrendSeries[] = Array.from(finalSeriesMap.entries()).map(([key, data]) => ({
+    id: key.split(':')[0]!,
+    name: data.name,
+    currency: data.currency,
+    count: data.count,
+    amount: data.amount.map((a) => Math.round(a * 100) / 100),
+  }));
+
+  return { groupBy, granularity, buckets, series };
 }
 
 export async function getInvoiceExportData(

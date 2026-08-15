@@ -32,6 +32,50 @@ export interface ReportSummary {
   }>
 }
 
+export type TrendGroupBy = 'client' | 'project' | 'task' | 'user'
+export type TrendGranularity = 'day' | 'week' | 'month'
+
+export interface TrendFilter extends ReportFilter {
+  groupBy: TrendGroupBy
+}
+
+export interface TrendSeries {
+  /** Entity id, or '__other__' for series folded past the top-7 cap. */
+  id: string
+  name: string
+  currency: string
+  /** Aligned 1:1 with TrendResult.buckets. */
+  hours: number[]
+  cost: number[]
+}
+
+export interface TrendResult {
+  groupBy: TrendGroupBy
+  granularity: TrendGranularity
+  /** ISO bucket-start dates, ascending, no gaps. */
+  buckets: string[]
+  series: TrendSeries[]
+}
+
+export type InvoiceTrendGroupBy = 'client' | 'status'
+
+export interface InvoiceTrendSeries {
+  /** Entity id (client id, or invoice status), or '__other__' for series folded past the top-7 cap. */
+  id: string
+  name: string
+  currency: string
+  /** Aligned 1:1 with InvoiceTrendResult.buckets. Count includes drafts; amount excludes them (not a real claim yet). */
+  count: number[]
+  amount: number[]
+}
+
+export interface InvoiceTrendResult {
+  groupBy: InvoiceTrendGroupBy
+  granularity: TrendGranularity
+  buckets: string[]
+  series: InvoiceTrendSeries[]
+}
+
 export interface InvoiceReportFilter {
   startDate?: string
   endDate?: string
@@ -39,6 +83,10 @@ export interface InvoiceReportFilter {
   status?: InvoiceStatus
   type?: InvoiceType
   paid?: boolean
+}
+
+export interface InvoiceTrendFilter extends InvoiceReportFilter {
+  groupBy: InvoiceTrendGroupBy
 }
 
 export interface InvoiceReportRow {

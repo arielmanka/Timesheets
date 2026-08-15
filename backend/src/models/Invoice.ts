@@ -38,6 +38,12 @@ export interface ITaxEntry {
   amount: number;
 }
 
+export interface IPayment {
+  amount: number;
+  date: Date;
+  recordedBy: Types.ObjectId;
+}
+
 export interface IInvoice extends Document {
   // Format: yyyymmdd-NNNNNN — creation date + a 6-digit, zero-padded,
   // never-resetting per-team sequence number (e.g. "20260810-000004").
@@ -65,8 +71,13 @@ export interface IInvoice extends Document {
   totalTax: number;
   total: number;
   currency: string;
+  // Cached running totals, always kept in sync with `payments` by
+  // recordPayment — `payments` is the source of truth (individual history),
+  // these two remain for the existing report/CSV/detail-view code that
+  // reads "amount paid so far" and "most recent payment date" directly.
   partialPaymentAmount: number | null;
   paymentDate: Date | null;
+  payments: IPayment[];
   // For a collective invoice, the client-billed period as chosen at
   // creation; for a personal invoice, auto-derived from the min/max date of
   // its included time records (the actual service/supply period) — never
@@ -120,6 +131,15 @@ const periodSchema = new Schema(
   {
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
+  },
+  { _id: false }
+);
+
+const paymentSchema = new Schema<IPayment>(
+  {
+    amount: { type: Number, required: true },
+    date: { type: Date, required: true },
+    recordedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { _id: false }
 );
@@ -211,6 +231,10 @@ const invoiceSchema = new Schema<IInvoice>(
     paymentDate: {
       type: Date,
       default: null,
+    },
+    payments: {
+      type: [paymentSchema],
+      default: [],
     },
     period: {
       type: periodSchema,

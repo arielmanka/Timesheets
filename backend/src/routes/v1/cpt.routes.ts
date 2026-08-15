@@ -81,9 +81,11 @@ router.get('/:teamId/invoices/:invoiceId/csv', requireTeamMember, invoicesContro
 // Report routes — nested under /teams/:teamId/reports
 // ---------------------------------------------------------------------------
 router.get('/:teamId/reports/summary', requireTeamMember, reportsController.summary);
+router.get('/:teamId/reports/trend', requireTeamMember, reportsController.trend);
 router.get('/:teamId/reports/export/csv', requireTeamMember, reportsController.exportCsv);
 router.get('/:teamId/reports/export/pdf', requireTeamMember, reportsController.exportPdf);
 router.get('/:teamId/reports/invoices', requireTeamMember, reportsController.invoiceReport);
+router.get('/:teamId/reports/invoices/trend', requireTeamMember, reportsController.invoiceTrend);
 router.get('/:teamId/reports/invoices/export/csv', requireTeamMember, reportsController.exportInvoicesCsv);
 router.get('/:teamId/reports/invoices/export/pdf', requireTeamMember, reportsController.exportInvoicesPdf);
 

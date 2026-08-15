@@ -283,11 +283,13 @@ export async function recordPayment(req: Request, res: Response, next: NextFunct
   try {
     const data = recordPaymentSchema.parse(req.body);
     const teamReq = req as unknown as TeamRequest;
+    const authReq = req as AuthenticatedRequest;
     const invoice = await invoiceService.recordPayment(
       req.params.invoiceId as string,
       teamReq.team.teamId,
       data.amount,
-      data.date
+      data.date,
+      authReq.user.userId
     );
     res.json({ invoice });
   } catch (err) {

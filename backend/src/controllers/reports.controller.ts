@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import * as reportService from '../services/report.service.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 import type { TeamRequest } from '../middleware/accessControl.js';
+import { AppError } from '../utils/errors.js';
 
 // See invoices.controller.ts — PDFKit's built-in fonts don't cover Polish
 // (or other Latin-Extended-A) characters; DejaVu Sans is embedded instead.
@@ -34,6 +35,47 @@ export async function summary(req: Request, res: Response, next: NextFunction): 
     if (req.query.status) filter.status = req.query.status as reportService.ReportFilter['status'];
 
     const result = await reportService.getSummary(filter, isManager, authReq.user.userId);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /teams/:teamId/reports/trend
+const TREND_GROUP_BY_VALUES = ['client', 'project', 'task', 'user'] as const;
+
+export async function trend(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const isManager = teamReq.team.role === 'manager';
+
+    const groupBy = req.query.groupBy as string | undefined;
+    if (!groupBy || !TREND_GROUP_BY_VALUES.includes(groupBy as (typeof TREND_GROUP_BY_VALUES)[number])) {
+      throw AppError.badRequest(
+        `groupBy must be one of: ${TREND_GROUP_BY_VALUES.join(', ')}`,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    const filter: reportService.ReportFilter = {
+      teamId: teamReq.team.teamId,
+    };
+
+    if (req.query.startDate) filter.startDate = new Date(req.query.startDate as string);
+    if (req.query.endDate) filter.endDate = new Date(req.query.endDate as string);
+    if (req.query.userId) filter.userId = req.query.userId as string;
+    if (req.query.projectId) filter.projectId = req.query.projectId as string;
+    if (req.query.clientId) filter.clientId = req.query.clientId as string;
+    if (req.query.taskId) filter.taskId = req.query.taskId as string;
+    if (req.query.status) filter.status = req.query.status as reportService.ReportFilter['status'];
+
+    const result = await reportService.getTrend(
+      filter,
+      groupBy as reportService.TrendGroupBy,
+      isManager,
+      authReq.user.userId
+    );
     res.json(result);
   } catch (err) {
     next(err);
@@ -168,6 +210,35 @@ export async function invoiceReport(req: Request, res: Response, next: NextFunct
 
     const result = await reportService.getInvoiceReport(
       parseInvoiceReportFilter(req),
+      isManager,
+      authReq.user.userId
+    );
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// GET /teams/:teamId/reports/invoices/trend
+const INVOICE_TREND_GROUP_BY_VALUES = ['client', 'status'] as const;
+
+export async function invoiceTrend(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const teamReq = req as unknown as TeamRequest;
+    const isManager = teamReq.team.role === 'manager';
+
+    const groupBy = req.query.groupBy as string | undefined;
+    if (!groupBy || !INVOICE_TREND_GROUP_BY_VALUES.includes(groupBy as (typeof INVOICE_TREND_GROUP_BY_VALUES)[number])) {
+      throw AppError.badRequest(
+        `groupBy must be one of: ${INVOICE_TREND_GROUP_BY_VALUES.join(', ')}`,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    const result = await reportService.getInvoiceTrend(
+      parseInvoiceReportFilter(req),
+      groupBy as reportService.InvoiceTrendGroupBy,
       isManager,
       authReq.user.userId
     );

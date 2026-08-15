@@ -27,6 +27,12 @@ export interface TaxEntry {
   amount: number
 }
 
+export interface Payment {
+  amount: number
+  date: string
+  recordedBy: ID
+}
+
 export interface Invoice {
   _id: ID
   /** Format: yyyymmdd-NNNNNN (creation date + a never-resetting 6-digit per-team sequence). */
@@ -52,6 +58,7 @@ export interface Invoice {
   currency: string
   partialPaymentAmount: number | null
   paymentDate: string | null
+  payments: Payment[]
   /** For a collective invoice, the client-billed period chosen at creation; for a personal invoice, auto-derived from its included time records. */
   period: { startDate: string; endDate: string } | null
   dueDate: string | null

@@ -67,6 +67,10 @@ const preparerName = computed(() => {
   const m = team.current?.members.find((mm) => mm.userId === invoice.value?.createdBy)
   return m ? `${m.firstName} ${m.lastName}` : '—'
 })
+function memberName(userId: string): string {
+  const m = team.current?.members.find((mm) => mm.userId === userId)
+  return m ? `${m.firstName} ${m.lastName}` : '—'
+}
 const isDraft = computed(() => invoice.value?.status === 'draft')
 const isOwnPersonalDraft = computed(
   () => isDraft.value && invoice.value?.type === 'personal' && invoice.value?.createdBy === auth.user?._id
@@ -213,12 +217,30 @@ const { loading: reverting, run: revertToDraft } = useAsyncAction(async () => {
 })
 
 // --- Record payment ----------------------------------------------------
+// Once a personal invoice is pooled into a collective one, the collective
+// invoice is the actual client-facing bill — payment must be recorded
+// there, not on the pooled personal invoice (mirrors the backend's
+// INVOICE_POOLED check in invoice.service.ts's recordPayment).
+const isPooledPersonal = computed(() => invoice.value?.type === 'personal' && !!invoice.value?.includedInCollectiveInvoiceId)
+const canRecordPayment = computed(
+  () =>
+    team.isManager &&
+    invoice.value?.status !== 'draft' &&
+    invoice.value?.status !== 'paid' &&
+    !isPooledPersonal.value
+)
+const remainingBalance = computed(() => {
+  if (!invoice.value) return 0
+  return Math.round((invoice.value.total - (invoice.value.partialPaymentAmount ?? 0)) * 100) / 100
+})
+
 const showPayment = ref(false)
 const paymentAmount = ref('')
 const paymentDate = ref(todayLocalDate())
 const { loading: recordingPayment, run: recordPayment } = useAsyncAction(async () => {
   invoice.value = await invoices.recordPayment(teamId, invoiceId, Number(paymentAmount.value), paymentDate.value)
   showPayment.value = false
+  paymentAmount.value = ''
   ui.success('Payment recorded.')
 })
 
@@ -428,6 +450,31 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
 
     <p v-if="invoice.notes" class="rounded-md bg-surface-100 px-3 py-2 text-sm text-surface-600">{{ invoice.notes }}</p>
 
+    <!-- Payment history -->
+    <div v-if="invoice.payments.length > 0">
+      <h2 class="mb-2 text-sm font-semibold text-surface-800">Payments</h2>
+      <div class="overflow-x-auto rounded-lg border border-surface-200 bg-white">
+        <table class="w-full text-sm">
+          <thead class="border-b border-surface-200 text-left text-xs uppercase tracking-wide text-surface-500">
+            <tr>
+              <th class="px-4 py-2 font-medium">Date</th>
+              <th class="px-4 py-2 font-medium">Recorded by</th>
+              <th class="px-4 py-2 text-right font-medium">Amount</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-surface-100">
+            <tr v-for="(p, i) in invoice.payments" :key="i">
+              <td class="px-4 py-2">{{ p.date.slice(0, 10) }}</td>
+              <td class="px-4 py-2">{{ memberName(p.recordedBy) }}</td>
+              <td class="px-4 py-2 text-right tabular-nums text-success-600">
+                <CurrencyDisplay :amount="p.amount" :currency="invoice.currency" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Add more time to a draft personal invoice -->
     <div v-if="isOwnPersonalDraft" class="rounded-lg border border-surface-200 bg-white p-4">
       <h2 class="mb-2 text-sm font-semibold text-surface-800">Add more time</h2>
@@ -471,17 +518,19 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
         <AppButton variant="danger" @click="showDeleteConfirm = true">Delete draft</AppButton>
         <AppButton :loading="sending" @click="send">Send</AppButton>
       </template>
-      <AppButton
-        v-if="team.isManager && invoice.status !== 'draft' && invoice.status !== 'paid'"
-        variant="secondary"
-        @click="showPayment = true"
-      >
+      <AppButton v-if="canRecordPayment" variant="secondary" @click="showPayment = true">
         Record payment
       </AppButton>
       <AppButton v-if="canRevertToDraft" variant="secondary" @click="showRevertConfirm = true">
         Revert to draft
       </AppButton>
     </div>
+    <p
+      v-if="team.isManager && isPooledPersonal && invoice.status !== 'draft' && invoice.status !== 'paid'"
+      class="text-xs text-surface-500"
+    >
+      This invoice has been pooled into a collective invoice — record the payment there instead.
+    </p>
 
     <Modal v-if="showEdit" title="Edit draft" @close="showEdit = false">
       <form id="edit-invoice-form" class="space-y-4" @submit.prevent="saveEdit">
@@ -534,8 +583,19 @@ const { loading: exportingCsv, run: exportCsv } = useAsyncAction(async () => {
 
     <Modal v-if="showPayment" title="Record payment" @close="showPayment = false">
       <form id="payment-form" class="space-y-4" @submit.prevent="recordPayment">
+        <p class="text-sm text-surface-600">
+          Remaining balance: <CurrencyDisplay :amount="remainingBalance" :currency="invoice.currency" />
+        </p>
         <FormField label="Amount">
-          <input v-model="paymentAmount" type="number" step="0.01" min="0.01" required class="field-control" />
+          <input
+            v-model="paymentAmount"
+            type="number"
+            step="0.01"
+            min="0.01"
+            :max="remainingBalance"
+            required
+            class="field-control"
+          />
         </FormField>
         <FormField label="Date">
           <input v-model="paymentDate" type="date" required class="field-control" />

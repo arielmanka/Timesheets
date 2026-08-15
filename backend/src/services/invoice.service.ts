@@ -750,7 +750,8 @@ export async function recordPayment(
   invoiceId: string,
   teamId: string,
   amount: number,
-  date: Date
+  date: Date,
+  recordedBy: string
 ): Promise<IInvoice> {
   const invoice = await Invoice.findOne({ _id: invoiceId, teamId });
   if (!invoice) {
@@ -764,15 +765,43 @@ export async function recordPayment(
     );
   }
 
-  const previousPaid = invoice.partialPaymentAmount ?? 0;
-  const totalPaid = previousPaid + amount;
+  // Once pooled, the collective invoice is the actual client-facing bill —
+  // a payment recorded here instead would silently go untracked against
+  // what the client is really being asked to pay.
+  if (invoice.type === 'personal' && invoice.includedInCollectiveInvoiceId) {
+    throw AppError.badRequest(
+      'This personal invoice has been pooled into a collective invoice — record the payment on the collective invoice instead.',
+      'INVOICE_POOLED'
+    );
+  }
 
-  if (totalPaid >= invoice.total) {
+  const previousPaid = invoice.partialPaymentAmount ?? 0;
+  const totalPaidCents = Math.round(previousPaid * 100) + Math.round(amount * 100);
+  const totalCents = Math.round(invoice.total * 100);
+
+  // A hard reject, not a silent clamp — the excess must be corrected by the
+  // caller (e.g. record a smaller amount, or fix an earlier over-recorded
+  // payment) rather than quietly vanishing from the record.
+  if (totalPaidCents > totalCents) {
+    const remaining = Math.round((invoice.total - previousPaid) * 100) / 100;
+    throw AppError.badRequest(
+      `This payment would exceed the invoice total. Remaining balance is ${remaining.toFixed(2)} ${invoice.currency}.`,
+      'PAYMENT_EXCEEDS_TOTAL'
+    );
+  }
+
+  const totalPaid = totalPaidCents / 100;
+  invoice.payments.push({ amount, date, recordedBy: recordedBy as any });
+
+  // Cent-rounded comparison — avoids floating-point drift (e.g. a subtotal
+  // that lands on 1440.0000000001) leaving a fully-paid invoice stuck as
+  // "partially paid".
+  if (totalPaidCents >= totalCents) {
     invoice.status = 'paid';
     invoice.partialPaymentAmount = invoice.total;
   } else {
     invoice.status = 'partially_paid';
-    invoice.partialPaymentAmount = Math.round(totalPaid * 100) / 100;
+    invoice.partialPaymentAmount = totalPaid;
   }
 
   invoice.paymentDate = date;

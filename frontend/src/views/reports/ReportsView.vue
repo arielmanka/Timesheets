@@ -7,11 +7,21 @@ import { useTasksStore } from '../../stores/tasks'
 import { useTeamStore } from '../../stores/team'
 import * as reportsService from '../../services/reports.service'
 import { useAsyncAction } from '../../composables/useAsyncAction'
-import type { ReportSummary, InvoiceReportSummary } from '../../types/report'
+import type {
+  ReportSummary,
+  InvoiceReportSummary,
+  TrendResult,
+  TrendGroupBy,
+  InvoiceTrendResult,
+  InvoiceTrendGroupBy,
+} from '../../types/report'
 import CurrencyDisplay from '../../components/ui/CurrencyDisplay.vue'
 import StatusPill from '../../components/ui/StatusPill.vue'
 import AppButton from '../../components/ui/AppButton.vue'
 import FormField from '../../components/ui/FormField.vue'
+import TrendChart from '../../components/charts/TrendChart.vue'
+import EmptyState from '../../components/ui/EmptyState.vue'
+import { rankColors, cssToken, OTHER_COLOR } from '../../utils/chartColors'
 
 const route = useRoute()
 const teamId = route.params.teamId as string
@@ -28,6 +38,7 @@ onMounted(async () => {
     clients.loaded ? Promise.resolve() : clients.fetchAll(teamId),
   ])
   runReport()
+  runTrend()
 })
 
 // --- Time report ---------------------------------------------------------
@@ -43,6 +54,71 @@ const { loading, run: runReport } = useAsyncAction(async () => {
     clientId: filters.clientId || undefined,
     taskId: filters.taskId || undefined,
   })
+})
+
+// --- Trend chart -----------------------------------------------------------
+const trendGroupBy = ref<TrendGroupBy>('project')
+const trend = ref<TrendResult | null>(null)
+
+const { loading: loadingTrend, run: runTrend } = useAsyncAction(async () => {
+  trend.value = await reportsService.getReportTrend(teamId, {
+    startDate: filters.startDate || undefined,
+    endDate: filters.endDate || undefined,
+    userId: filters.userId || undefined,
+    projectId: filters.projectId || undefined,
+    clientId: filters.clientId || undefined,
+    taskId: filters.taskId || undefined,
+    groupBy: trendGroupBy.value,
+  })
+})
+
+async function applyTimeFilters(): Promise<void> {
+  await Promise.all([runReport(), runTrend()])
+}
+
+watch(trendGroupBy, runTrend)
+
+// Same rank -> color assignment shared by the hours chart and every
+// per-currency cost chart below, so a given entity reads as the same color
+// everywhere it appears (color follows the entity, not its position).
+const entityColors = computed(() => {
+  const totalsById = new Map<string, number>()
+  for (const s of trend.value?.series ?? []) {
+    totalsById.set(s.id, (totalsById.get(s.id) ?? 0) + s.hours.reduce((a, b) => a + b, 0))
+  }
+  return rankColors(totalsById)
+})
+
+// Hours aren't currency-specific — merge a entity's rows across currencies
+// (elementwise) into one line.
+const hoursChartSeries = computed(() => {
+  const buckets = trend.value?.buckets ?? []
+  const merged = new Map<string, { name: string; data: number[] }>()
+  for (const s of trend.value?.series ?? []) {
+    const entry = merged.get(s.id) ?? { name: s.name, data: new Array(buckets.length).fill(0) }
+    s.hours.forEach((h, i) => {
+      entry.data[i] += h
+    })
+    merged.set(s.id, entry)
+  }
+  return [...merged.entries()].map(([id, e]) => ({
+    id,
+    name: e.name,
+    color: entityColors.value.get(id) ?? OTHER_COLOR,
+    data: e.data,
+  }))
+})
+
+// Cost is currency-specific — one chart per distinct currency present,
+// same rank-based colors as the hours chart above.
+const costChartsByCurrency = computed(() => {
+  const byCurrency = new Map<string, Array<{ id: string; name: string; color: string; data: number[] }>>()
+  for (const s of trend.value?.series ?? []) {
+    const list = byCurrency.get(s.currency) ?? []
+    list.push({ id: s.id, name: s.name, color: entityColors.value.get(s.id) ?? OTHER_COLOR, data: s.cost })
+    byCurrency.set(s.currency, list)
+  }
+  return [...byCurrency.entries()].map(([currency, series]) => ({ currency, series }))
 })
 
 watch(
@@ -107,6 +183,81 @@ const { loading: loadingInvoiceReport, run: runInvoiceReport } = useAsyncAction(
   invoiceSummary.value = await reportsService.getInvoiceReport(teamId, invoiceFilterParams())
 })
 
+// Personal and collective invoices are charted as two separate, always-shown
+// panels (never combined) — a personal invoice pooled into a collective one
+// would otherwise double-count if the two were summed together. Both panels
+// share the same date/client/status/paid filters as the rest of this tab;
+// only `type` is forced per panel, overriding whatever the type filter above
+// is set to.
+const invoiceTrendGroupBy = ref<InvoiceTrendGroupBy>('client')
+const personalInvoiceTrend = ref<InvoiceTrendResult | null>(null)
+const collectiveInvoiceTrend = ref<InvoiceTrendResult | null>(null)
+
+const { loading: loadingInvoiceTrend, run: runInvoiceTrend } = useAsyncAction(async () => {
+  const base = invoiceFilterParams()
+  const [personal, collective] = await Promise.all([
+    reportsService.getInvoiceTrend(teamId, { ...base, type: 'personal', groupBy: invoiceTrendGroupBy.value }),
+    reportsService.getInvoiceTrend(teamId, { ...base, type: 'collective', groupBy: invoiceTrendGroupBy.value }),
+  ])
+  personalInvoiceTrend.value = personal
+  collectiveInvoiceTrend.value = collective
+})
+
+watch(invoiceTrendGroupBy, runInvoiceTrend)
+
+// Matches StatusPill's existing status/tone convention — when grouping by
+// status, the series ARE statuses, so they should read as the same colors
+// used everywhere else in the app for that status, not an arbitrary
+// categorical rank order.
+const STATUS_TREND_COLORS: Record<string, string> = {
+  draft: cssToken('--color-surface-500', '#8a8983'),
+  sent: cssToken('--color-primary-600', '#184f95'),
+  partially_paid: cssToken('--color-warning-600', '#a35a00'),
+  overdue: cssToken('--color-danger-600', '#c62a2a'),
+  paid: cssToken('--color-success-600', '#0f7d0f'),
+}
+
+function buildInvoiceCharts(trend: InvoiceTrendResult | null) {
+  const buckets = trend?.buckets ?? []
+  const totalsById = new Map<string, number>()
+  for (const s of trend?.series ?? []) {
+    totalsById.set(s.id, (totalsById.get(s.id) ?? 0) + s.count.reduce((a, b) => a + b, 0))
+  }
+  const colors = trend?.groupBy === 'status' ? new Map(Object.entries(STATUS_TREND_COLORS)) : rankColors(totalsById)
+
+  const merged = new Map<string, { name: string; data: number[] }>()
+  for (const s of trend?.series ?? []) {
+    const entry = merged.get(s.id) ?? { name: s.name, data: new Array(buckets.length).fill(0) }
+    s.count.forEach((c, i) => {
+      entry.data[i] += c
+    })
+    merged.set(s.id, entry)
+  }
+  const countSeries = [...merged.entries()].map(([id, e]) => ({
+    id,
+    name: e.name,
+    color: colors.get(id) ?? OTHER_COLOR,
+    data: e.data,
+  }))
+
+  const byCurrency = new Map<string, Array<{ id: string; name: string; color: string; data: number[] }>>()
+  for (const s of trend?.series ?? []) {
+    const list = byCurrency.get(s.currency) ?? []
+    list.push({ id: s.id, name: s.name, color: colors.get(s.id) ?? OTHER_COLOR, data: s.amount })
+    byCurrency.set(s.currency, list)
+  }
+  const amountCharts = [...byCurrency.entries()].map(([currency, series]) => ({ currency, series }))
+
+  return { countSeries, amountCharts }
+}
+
+const personalInvoiceCharts = computed(() => buildInvoiceCharts(personalInvoiceTrend.value))
+const collectiveInvoiceCharts = computed(() => buildInvoiceCharts(collectiveInvoiceTrend.value))
+
+async function applyInvoiceFilters(): Promise<void> {
+  await Promise.all([runInvoiceReport(), runInvoiceTrend()])
+}
+
 const { loading: exportingInvoicesCsv, run: exportInvoicesCsv } = useAsyncAction(() =>
   reportsService.downloadInvoiceReportCsv(teamId, invoiceFilterParams())
 )
@@ -115,7 +266,7 @@ const { loading: exportingInvoicesPdf, run: exportInvoicesPdf } = useAsyncAction
 )
 
 watch(activeTab, (tab) => {
-  if (tab === 'invoices' && !invoiceSummary.value) runInvoiceReport()
+  if (tab === 'invoices' && !invoiceSummary.value) applyInvoiceFilters()
 })
 
 const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as const
@@ -146,8 +297,8 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
     </div>
 
     <template v-if="activeTab === 'time'">
-      <form class="grid grid-cols-2 gap-3 rounded-lg border border-surface-200 bg-white p-4 sm:grid-cols-3" @submit.prevent="runReport">
-        <FormField label="Start date">
+      <form class="grid grid-cols-2 gap-3 rounded-lg border border-surface-200 bg-white p-4 sm:grid-cols-3" @submit.prevent="applyTimeFilters">
+        <FormField label="Start date" hint="Trend chart defaults to the last 30 days when left blank.">
           <input v-model="filters.startDate" type="date" class="field-control" />
         </FormField>
         <FormField label="End date">
@@ -178,11 +329,43 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
           </select>
         </FormField>
         <div class="col-span-2 flex items-end gap-2 sm:col-span-3">
-          <AppButton type="submit" :loading="loading">Apply filters</AppButton>
+          <AppButton type="submit" :loading="loading || loadingTrend">Apply filters</AppButton>
           <AppButton variant="secondary" :loading="exportingCsv" @click="exportCsv">Export CSV</AppButton>
           <AppButton variant="secondary" :loading="exportingPdf" @click="exportPdf">Export PDF</AppButton>
         </div>
       </form>
+
+      <div>
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-surface-800">Trend</h2>
+          <div class="flex rounded-lg border border-surface-200 bg-white p-1 text-sm">
+            <button
+              v-for="g in (['client', 'project', 'task', 'user'] as const).filter((g) => g !== 'user' || team.isManager)"
+              :key="g"
+              type="button"
+              class="rounded-md px-3 py-1.5 font-medium capitalize"
+              :class="trendGroupBy === g ? 'bg-primary-500 text-white' : 'text-surface-600'"
+              @click="trendGroupBy = g"
+            >
+              {{ g }}
+            </button>
+          </div>
+        </div>
+
+        <EmptyState v-if="trend && trend.series.length === 0" title="No time in this period" message="Nothing matches the current filters." />
+        <div v-else-if="trend" class="space-y-4">
+          <TrendChart title="Hours" :buckets="trend.buckets" :granularity="trend.granularity" :series="hoursChartSeries" value-format="hours" />
+          <TrendChart
+            v-for="c in costChartsByCurrency"
+            :key="c.currency"
+            :title="`Cost (${c.currency})`"
+            :buckets="trend.buckets"
+            :granularity="trend.granularity"
+            :series="c.series"
+            :value-format="{ currency: c.currency }"
+          />
+        </div>
+      </div>
 
       <template v-if="summary">
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -271,8 +454,8 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
         Showing only invoices you created. Managers see the whole team's.
       </p>
 
-      <form class="grid grid-cols-2 gap-3 rounded-lg border border-surface-200 bg-white p-4 sm:grid-cols-3" @submit.prevent="runInvoiceReport">
-        <FormField label="Start date" hint="Filters by invoice creation date.">
+      <form class="grid grid-cols-2 gap-3 rounded-lg border border-surface-200 bg-white p-4 sm:grid-cols-3" @submit.prevent="applyInvoiceFilters">
+        <FormField label="Start date" hint="Filters by invoice creation date. Trend chart defaults to the last 30 days when left blank.">
           <input v-model="invoiceFilters.startDate" type="date" class="field-control" />
         </FormField>
         <FormField label="End date">
@@ -309,11 +492,77 @@ const statusOrder = ['draft', 'sent', 'partially_paid', 'overdue', 'paid'] as co
           </select>
         </FormField>
         <div class="col-span-2 flex items-end gap-2 sm:col-span-3">
-          <AppButton type="submit" :loading="loadingInvoiceReport">Apply filters</AppButton>
+          <AppButton type="submit" :loading="loadingInvoiceReport || loadingInvoiceTrend">Apply filters</AppButton>
           <AppButton variant="secondary" :loading="exportingInvoicesCsv" @click="exportInvoicesCsv">Export CSV</AppButton>
           <AppButton variant="secondary" :loading="exportingInvoicesPdf" @click="exportInvoicesPdf">Export PDF</AppButton>
         </div>
       </form>
+
+      <div v-if="personalInvoiceTrend || collectiveInvoiceTrend">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-surface-800">Trend</h2>
+          <div class="flex rounded-lg border border-surface-200 bg-white p-1 text-sm">
+            <button
+              v-for="g in ['client', 'status'] as const"
+              :key="g"
+              type="button"
+              class="rounded-md px-3 py-1.5 font-medium capitalize"
+              :class="invoiceTrendGroupBy === g ? 'bg-primary-500 text-white' : 'text-surface-600'"
+              @click="invoiceTrendGroupBy = g"
+            >
+              {{ g }}
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-6">
+          <div>
+            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-surface-500">Personal invoices</h3>
+            <EmptyState v-if="personalInvoiceTrend && personalInvoiceTrend.series.length === 0" title="No personal invoices in this period" />
+            <div v-else-if="personalInvoiceTrend" class="space-y-4">
+              <TrendChart
+                title="Count"
+                :buckets="personalInvoiceTrend.buckets"
+                :granularity="personalInvoiceTrend.granularity"
+                :series="personalInvoiceCharts.countSeries"
+                value-format="count"
+              />
+              <TrendChart
+                v-for="c in personalInvoiceCharts.amountCharts"
+                :key="c.currency"
+                :title="`Amount (${c.currency})`"
+                :buckets="personalInvoiceTrend.buckets"
+                :granularity="personalInvoiceTrend.granularity"
+                :series="c.series"
+                :value-format="{ currency: c.currency }"
+              />
+            </div>
+          </div>
+
+          <div>
+            <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-surface-500">Collective invoices</h3>
+            <EmptyState v-if="collectiveInvoiceTrend && collectiveInvoiceTrend.series.length === 0" title="No collective invoices in this period" />
+            <div v-else-if="collectiveInvoiceTrend" class="space-y-4">
+              <TrendChart
+                title="Count"
+                :buckets="collectiveInvoiceTrend.buckets"
+                :granularity="collectiveInvoiceTrend.granularity"
+                :series="collectiveInvoiceCharts.countSeries"
+                value-format="count"
+              />
+              <TrendChart
+                v-for="c in collectiveInvoiceCharts.amountCharts"
+                :key="c.currency"
+                :title="`Amount (${c.currency})`"
+                :buckets="collectiveInvoiceTrend.buckets"
+                :granularity="collectiveInvoiceTrend.granularity"
+                :series="c.series"
+                :value-format="{ currency: c.currency }"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       <template v-if="invoiceSummary">
         <div>
